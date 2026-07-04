@@ -1,0 +1,7 @@
+# Runtime deps (credential-free fixtures mode needs only these).
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+
+# Dev/test:  pip install pytest httpx
+# Live Apify run (optional):  pip install apify-client

@@ -1,0 +1,286 @@
+{
+  "name": "Kollab — weekly KOL re-vet alert",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Kollab — weekly KOL re-vet\n\n**Env var:** set `KOLLAB_API_URL` on the n8n instance (base URL of the Kollab API,\nno trailing slash — e.g. `http://127.0.0.1:8000`). The *Fetch shortlist* node calls\n`$env.KOLLAB_API_URL + /api/shortlist`.\n\n**Two triggers, one flow.** The weekly cron (Mon 08:00 Asia/Bangkok — workflow\ntimezone) is production; the webhook exists so a demo can fire the identical run\non camera without waiting for Monday: `GET <n8n-host>/webhook/kollab-revet`.\nUse the Production URL (workflow active) — the snapshot lives in workflow static\ndata, which only persists across production executions.\n\n**Slack:** open *Slack alert* and attach the agency workspace credential\n(bot token, `chat:write`, bot invited to the channel). Until then the node shows a\ncredential warning — everything upstream still runs.",
+        "height": 400,
+        "width": 460
+      },
+      "id": "9b1f2a60-0f3e-4c1a-8d7b-5e2c4a9f1d10",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+      "name": "Weekly re-vet — Mon 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -120,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "kollab-revet",
+        "options": {}
+      },
+      "id": "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
+      "name": "Manual demo trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        180
+      ],
+      "webhookId": "f4b7c9e2-8a15-4d63-b2e7-0c9d1a5f8b34"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.KOLLAB_API_URL }}/api/shortlist",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "3e4f5a6b-7c8d-4e9f-0a1b-2c3d4e5f6a7b",
+      "name": "Fetch shortlist",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        140,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Kollab re-vet diff — compare this run's shortlist against the snapshot from the\n// previous run (kept in workflow static data) and emit ONE ITEM PER ALERT.\n//\n// Alert conditions:\n//   (a) risk level worsened            clear -> medium/high, medium -> high\n//   (b) engagement rate dropped >40%   vs the snapshotted value\n//   (c) new fraud signal               a risk.signals label not present last run\n//\n// NOTE: workflow static data persists only across PRODUCTION executions\n// (the cron, or the webhook's Production URL on an active workflow).\n// Editor test runs always start from an empty snapshot.\n\nconst staticData = $getWorkflowStaticData('global');\nconst previous = staticData.kolSnapshot || {};\nconst isFirstRun = Object.keys(previous).length === 0;\n\nconst response = $input.first().json;\nconst kols = response.kols || [];\n\nconst RISK_RANK = { clear: 0, medium: 1, high: 2 };\nconst ER_DROP_THRESHOLD = 0.4; // fraction — alert when ER fell by more than 40%\n\nconst alerts = [];\n\nfor (const kol of kols) {\n  const prev = previous[kol.id];\n  if (!prev) continue; // new to the shortlist: baseline silently, diff from next run\n\n  const signals = (kol.risk && kol.risk.signals) || [];\n\n  // (a) risk level worsened\n  if (RISK_RANK[kol.risk.level] > RISK_RANK[prev.riskLevel]) {\n    const lead = signals[0]; // vet.py orders badges structural-first, most-severe-first\n    alerts.push({\n      handle: kol.handle,\n      kolId: kol.id,\n      change: 'risk_worsened',\n      summary:\n        'risk ' + prev.riskLevel + ' → ' + kol.risk.level +\n        (lead ? ' (' + lead.label + ': ' + lead.detail + ')' : ''),\n    });\n  }\n\n  // (b) engagement rate dropped more than 40%\n  if (prev.engagementRate > 0) {\n    const drop = (prev.engagementRate - kol.engagementRate) / prev.engagementRate;\n    if (drop > ER_DROP_THRESHOLD) {\n      alerts.push({\n        handle: kol.handle,\n        kolId: kol.id,\n        change: 'engagement_drop',\n        summary:\n          'engagement ' + prev.engagementRate + '% → ' + kol.engagementRate +\n          '% (−' + Math.round(drop * 100) + '% vs last run)',\n      });\n    }\n  }\n\n  // (c) fraud signals that were not present last run\n  const prevLabels = new Set(prev.signalLabels || []);\n  for (const s of signals) {\n    if (!prevLabels.has(s.label)) {\n      alerts.push({\n        handle: kol.handle,\n        kolId: kol.id,\n        change: 'new_signal',\n        summary: 'new fraud signal — ' + s.label + ': ' + s.detail,\n      });\n    }\n  }\n}\n\n// Update the snapshot AFTER diffing, so the next run compares against this one.\nconst nextSnapshot = {};\nfor (const kol of kols) {\n  nextSnapshot[kol.id] = {\n    handle: kol.handle,\n    riskLevel: kol.risk.level,\n    engagementRate: kol.engagementRate,\n    fitScore: kol.fitScore,\n    signalLabels: ((kol.risk && kol.risk.signals) || []).map((s) => s.label),\n  };\n}\nstaticData.kolSnapshot = nextSnapshot;\nstaticData.lastRunAt = new Date().toISOString();\n\nif (alerts.length === 0) {\n  return [{ json: { hasAlerts: false, checked: kols.length, firstRun: isFirstRun } }];\n}\n\nreturn alerts.map((a) => ({\n  json: { hasAlerts: true, checked: kols.length, runAt: staticData.lastRunAt, ...a },\n}));"
+      },
+      "id": "4f5a6b7c-8d9e-4f0a-1b2c-3d4e5f6a7b8c",
+      "name": "Diff vs last snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d",
+              "leftValue": "={{ $json.hasAlerts }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5a6b7c8d-9e0f-4a1b-2c3d-4e5f6a7b8c9d",
+      "name": "Any alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        620,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#kol-vetting"
+        },
+        "text": "=:rotating_light: Kollab re-vet: @{{ $json.handle }} — {{ $json.summary }}. Review before the next client call.",
+        "otherOptions": {}
+      },
+      "id": "6b7c8d9e-0f1a-4b2c-3d4e-5f6a7b8c9d0e",
+      "name": "Slack alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        -80
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME",
+          "name": "Slack account (placeholder — agency adds bot token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8c9d0e1f-2a3b-4c5d-6e7f-8a9b0c1d2e3f",
+              "name": "loggedAt",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "9d0e1f2a-3b4c-4d5e-6f7a-8b9c0d1e2f3a",
+              "name": "workflow",
+              "value": "kol-revet-alert",
+              "type": "string"
+            },
+            {
+              "id": "0e1f2a3b-4c5d-4e6f-7a8b-9c0d1e2f3a4b",
+              "name": "handle",
+              "value": "={{ $json.handle }}",
+              "type": "string"
+            },
+            {
+              "id": "1f2a3b4c-5d6e-4f7a-8b9c-0d1e2f3a4b5c",
+              "name": "change",
+              "value": "={{ $json.change }}",
+              "type": "string"
+            },
+            {
+              "id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d",
+              "name": "summary",
+              "value": "={{ $json.summary }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7c8d9e0f-1a2b-4c3d-4e5f-6a7b8c9d0e1f",
+      "name": "Audit log entry",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        880,
+        120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "8d9e0f1a-2b3c-4d4e-5f6a-7b8c9d0e1f2a",
+      "name": "No changes — snapshot updated",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        880,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Weekly re-vet — Mon 08:00": {
+      "main": [
+        [
+          {
+            "node": "Fetch shortlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual demo trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch shortlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch shortlist": {
+      "main": [
+        [
+          {
+            "node": "Diff vs last snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diff vs last snapshot": {
+      "main": [
+        [
+          {
+            "node": "Any alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any alerts?": {
+      "main": [
+        [
+          {
+            "node": "Slack alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Audit log entry",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No changes — snapshot updated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Bangkok",
+    "saveManualExecutions": true
+  },
+  "pinData": {}
+}

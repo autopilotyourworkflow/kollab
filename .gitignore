@@ -1,0 +1,40 @@
+# ── LOCAL-ONLY strategy — NEVER publish (company research, positioning, Loom script) ──
+_planning/
+
+# ── Secrets ──
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# ── Node / frontend ──
+node_modules/
+dist/
+build/
+.vite/
+*.local
+
+# ── Python / backend ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Data: ignore raw scrape dumps & cache; KEEP curated seed fixtures tracked ──
+data/raw/
+data/cache/
+*.log
+
+# ── impeccable tooling + critique snapshots (internal) ──
+.impeccable/
+
+# ── OS / editor ──
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

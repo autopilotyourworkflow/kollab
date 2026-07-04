@@ -1,0 +1,62 @@
+{
+  "brand": "glow-lab",
+  "labeled_by": "provisional — auto-drafted from the curated fixture story, TO BE RE-LABELED by Beam",
+  "rubric": "backend/eval/rubric.md",
+  "labels": [
+    {
+      "id": "k1",
+      "include": true,
+      "reason": "Cleanest fit in the set: 8/10 recent videos are actives/ingredient explainers, dead-on for the education pillar; ER 7.2% with no pod signatures; posting 3-4x/week. Core topic, hard-clear authenticity."
+    },
+    {
+      "id": "k2",
+      "include": true,
+      "reason": "Dermatologist doing myth-busting content — authority that reinforces the honesty pillar; exceptionally clean engagement (ER 8.0%, deep reply threads). Audience skews slightly older than the 22-34 target, but audience is advisory-only and never decides a label (rubric section 5)."
+    },
+    {
+      "id": "k3",
+      "include": true,
+      "reason": "Judgment call resolved include: GRWM is lifestyle-blended, but skincare-in-routine is on-pillar and central to her recent content — adjacent-with-real-overlap, not diluted (rubric section 3). Clean risk, steady cadence, and Northern reach is a bonus. Flip condition: if recent content drifted to <2/10 skincare-led videos, this becomes a k10-style exclude."
+    },
+    {
+      "id": "k4",
+      "include": false,
+      "reason": "Hard authenticity fail: a 41-account comment pod across 6 unrelated creators plus a 6.2x view spike over her own baseline. The 9.1% ER the brand would be paying for is manufactured. High topic fit and 486K followers buy none of this back (rubric section 1). This is the tempting-looking KOL the harness most needs the pipeline to demote."
+    },
+    {
+      "id": "k5",
+      "include": true,
+      "reason": "Ingredient-science deep dives at mid-tier reach — core topic for the actives-education pillar; ER 5.2% is healthy for the tier and comments are clean. The scale anchor of the shortlist."
+    },
+    {
+      "id": "k6",
+      "include": false,
+      "reason": "Bought follower base: 121K followers but 2.9K median views (15x below the tier floor) and 68% of sampled commenters are empty/non-Thai accounts. The reach does not exist; promo-heavy generic content on top. Unambiguous exclude (rubric section 1)."
+    },
+    {
+      "id": "k7",
+      "include": true,
+      "reason": "Clean-beauty/sensitive-skin focus overlaps the sensitive-friendly pillar directly; ER 6.8% with no anomalies, posts 3x/week. Dependable include."
+    },
+    {
+      "id": "k8",
+      "include": false,
+      "reason": "Judgment call resolved exclude-until-cleared, the closest call in the set: a medium boosted-post pattern (2 posts at 2.1x her own median) stacked on an unresolved conflict flag (paid promo for a competing skincare brand 18 days ago), on adjacent-not-core topic fit (makeup-led). One caveat alone would lean include; two open caveats plus adjacency fail rubric sections 1-3. Flip condition: exclusivity check clears AND the organic baseline verifies — then she re-enters as a reach add."
+    },
+    {
+      "id": "k9",
+      "include": true,
+      "reason": "Blunt honest-review format is exactly the brief's 'ingredient honesty over hype' ask; ER 7.5% with a high save/share ratio and near-daily posting. Core tone fit with excellent authenticity."
+    },
+    {
+      "id": "k10",
+      "include": false,
+      "reason": "Judgment call resolved exclude for THIS brief: engagement is genuine (ER 3.2% is normal for macro-lifestyle) and reach is huge, but skincare relevance is diluted across broad lifestyle content — 'diluted' under rubric section 3, and this brief prioritizes topic authority over awareness volume. Flip condition: an awareness-volume brief would make her an include; the exclusion is about brief fit, not creator quality."
+    },
+    {
+      "id": "k11",
+      "include": true,
+      "reason": "Routine-led skincare with product comparisons — solid core fit, clean engagement (ER 4.6%, healthy for tier). The slowing cadence (6 days since last post, flat trajectory) is a knock recorded here, not a kill (rubric section 4)."
+    }
+  ]
+}

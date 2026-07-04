@@ -1,0 +1,225 @@
+@import "tailwindcss";
+
+/* ────────────────────────────────────────────────────────────────────────
+   Kollab design tokens — Convert Cake's MEASURED brand CI, extracted from
+   convertcake.com computed styles + their theme's own root variables
+   (--theme-main-color: #0536D2, --theme-sub-color: #2D303C,
+    --text-default-color: #75809D). See DESIGN.md for the full extraction.
+   ──────────────────────────────────────────────────────────────────────── */
+@theme {
+  /* Brand — Convert Cake cobalt (their --theme-main-color, verbatim) */
+  --color-brand: #0536d2;
+  --color-brand-hover: #0430bc;
+  --color-brand-active: #032795;
+  --color-brand-300: #597ef3; /* secondary accent, focus ring */
+  --color-brand-100: #c8d4fb; /* their pill tint (measured) */
+  --color-brand-50: #e6ecfd; /* their panel tint / stat chips (measured) */
+
+  /* Ink — their heading + navy ramp */
+  --color-ink: #2d303c; /* primary text — their --theme-sub-color */
+  --color-ink-900: #000e3f; /* their deep navy — sidebar, footer, dark sections */
+  --color-ink-800: #122252; /* navy lifted — hover surfaces on navy */
+  --color-ink-700: #41465a; /* secondary text */
+  --color-ink-500: #5b6580; /* muted text — their #75809D darkened to hold AA */
+  --color-ink-400: #75809d; /* their --text-default-color — large/secondary only */
+
+  /* Neutral surfaces */
+  --color-bg: #ffffff;
+  --color-surface: #f8f9fb;
+  --color-panel: #f1f3f7; /* second neutral: toolbars, rails */
+  --color-border: #e5e8ef;
+  --color-border-strong: #d3d8e2;
+
+  /* Semantic — verified / risk */
+  --color-verified: #1d8102;
+  --color-verified-fg: #14660a;
+  --color-verified-bg: #ecfce5;
+  --color-verified-border: #c7ebb5;
+
+  --color-risk-high: #d92d20;
+  --color-risk-high-fg: #b42318;
+  --color-risk-high-bg: #fef3f2;
+  --color-risk-high-border: #fecdca;
+
+  --color-risk-med: #b54708;
+  --color-risk-med-fg: #93370d;
+  --color-risk-med-bg: #fffaeb;
+  --color-risk-med-border: #fedf89;
+
+  /* Provenance chips */
+  --color-prov-measured-bg: #e6ecfd;
+  --color-prov-measured-fg: #0430bc;
+  --color-prov-inferred-bg: #fffaeb;
+  --color-prov-inferred-fg: #93370d;
+  --color-prov-estimated-bg: #f1f3f7;
+  --color-prov-estimated-fg: #5b6172;
+
+  /* Type */
+  --font-sans: "Manrope Variable", "Noto Sans Thai", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-thai: "Noto Sans Thai", "Manrope Variable", sans-serif;
+
+  /* Radius — their generous scale: 8 buttons · 12–16 cards · 24 panels · pills */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+
+  /* Elevation — their soft cool shadows (measured: rgba(73,104,126,.16) /
+     rgba(147,178,199,.15) halos), never harsh black */
+  --shadow-xs: 0 1px 2px 0 rgb(0 14 63 / 0.06);
+  --shadow-sm: 0 2px 6px 0 rgb(73 104 126 / 0.12);
+  --shadow-md: 0 16px 24px 0 rgb(73 104 126 / 0.16);
+  --shadow-lg: 0 16px 24px 0 rgb(73 104 126 / 0.16), 0 0 21px 0 rgb(147 178 199 / 0.15);
+
+  /* Motion — their reveal ease (measured 0.5s cubic-bezier(.215,.61,.355,1)) + ours */
+  --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Semantic z-index scale (never arbitrary 9999) */
+@layer base {
+  :root {
+    --z-base: 0;
+    --z-sticky: 10;
+    --z-dropdown: 20;
+    --z-popover: 30;
+    --z-backdrop: 40;
+    --z-modal: 50;
+    --z-toast: 60;
+    --z-tooltip: 70;
+    color-scheme: light;
+  }
+
+  /* Density modes (user toggle in the topbar, persisted):
+     comfortable = their air at working density; spacious = full marketing air. */
+  [data-density="comfortable"] {
+    --d-row-py: 12px;
+    --d-cell-text: 14px;
+    --d-page-px: 24px;
+    --d-page-py: 24px;
+    --d-block-gap: 20px;
+  }
+  [data-density="spacious"] {
+    --d-row-py: 22px;
+    --d-cell-text: 15px;
+    --d-page-px: 40px;
+    --d-page-py: 36px;
+    --d-block-gap: 28px;
+  }
+
+  /* Density switches animate: rows relax/tighten instead of snapping.
+     (Bounded: paddings on table rows only, not arbitrary layout.) */
+  .density-anim {
+    transition:
+      padding 0.3s var(--ease-out-quart),
+      font-size 0.3s var(--ease-out-quart),
+      background-color 0.3s ease;
+  }
+
+  /* Evidence-panel content rises as the row expands (transform+opacity only) */
+  @keyframes evidence-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .animate-evidence-in {
+    animation: evidence-in 0.25s var(--ease-out-quart) both;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* Smooth anchor scrolling — only for users who haven't opted out of motion */
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+
+  body {
+    margin: 0;
+    min-height: 100svh;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4 {
+    margin: 0;
+    color: inherit; /* inherit from context: ink in the tool, white on the dark landing */
+    font-weight: 600;
+    letter-spacing: -0.011em;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; text-wrap: pretty; }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-300);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  ::selection {
+    background: var(--color-brand-100);
+    color: var(--color-ink-900);
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
+    border-radius: 999px;
+    border: 2px solid var(--color-surface);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-ink-400); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* Tabular numerals for all metrics/scores so columns align */
+  .tnum { font-variant-numeric: tabular-nums; }
+  .font-thai { font-family: var(--font-thai); }
+}
+
+/* Print: export only the client-ready shortlist (Save as PDF) */
+@media print {
+  body { background: #fff; }
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area {
+    position: absolute;
+    inset: 0;
+    max-height: none;
+    overflow: visible;
+    padding: 28px;
+  }
+  .no-print { display: none !important; }
+}
