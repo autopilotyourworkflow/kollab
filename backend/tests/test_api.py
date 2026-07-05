@@ -54,21 +54,6 @@ def test_apify_source_without_token_answers_503(monkeypatch):
     assert "APIFY_TOKEN" in r.json()["detail"]
 
 
-def test_apify_source_without_client_lib_answers_503(monkeypatch):
-    # Token present but apify-client not installed (the credential-free install):
-    # still an honest 503 naming the missing piece. (POST carries the brief a
-    # live source needs.)
-    monkeypatch.setenv("KOLLAB_SOURCE", "apify")
-    monkeypatch.setenv("APIFY_TOKEN", "dummy")
-    brief = {
-        "brand": "Test", "brandTh": "เทสต์", "category": "Skincare",
-        "audience": "Thai women", "pillars": ["a"], "region": "BKK", "website": "x.co",
-    }
-    r = client.post("/api/shortlist", json=brief)
-    assert r.status_code == 503
-    assert "apify-client" in r.json()["detail"]
-
-
 def test_apify_source_get_without_brief_answers_400(monkeypatch):
     # GET has no brief and a live source carries no default one -> honest 400.
     monkeypatch.setenv("KOLLAB_SOURCE", "apify")

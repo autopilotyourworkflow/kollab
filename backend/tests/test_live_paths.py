@@ -117,6 +117,20 @@ def test_apify_loop_assembles_budgeted_kols():
     assert pres.topic_score > 0 and "overlap" in (pres.topic_rationale or "")
 
 
+def test_dataset_id_handles_dict_and_typed_run():
+    # apify-client v3 returns a typed Run object (snake_case attr), older/fake
+    # clients return a dict — the adapter must read both (regression: the real
+    # SDK's Run has no .get()).
+    from app.sources.apify import _dataset_id
+
+    class _Run:
+        default_dataset_id = "ds_typed"
+
+    assert _dataset_id({"defaultDatasetId": "ds_dict"}) == "ds_dict"
+    assert _dataset_id(_Run()) == "ds_typed"
+    assert _dataset_id(None) is None
+
+
 def test_apify_loop_stops_before_crossing_the_cap():
     fake = FakeApifyClient({
         TIKTOK_SCRAPER_ACTOR: _search_response,

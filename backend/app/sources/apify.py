@@ -43,6 +43,16 @@ _VERTICAL_KEYWORDS = {
 }
 
 
+def _dataset_id(run) -> str | None:
+    """Extract the run's default dataset id from either a dict (tests / older
+    client) or the apify-client v3 typed `Run` model (snake_case attribute)."""
+    if run is None:
+        return None
+    if isinstance(run, dict):
+        return run.get("defaultDatasetId") or run.get("default_dataset_id")
+    return getattr(run, "default_dataset_id", None) or getattr(run, "defaultDatasetId", None)
+
+
 def infer_tier(fans: int) -> str:
     if fans >= TIER_MACRO_MIN:
         return "macro"
@@ -214,7 +224,7 @@ class ApifyAdapter(KOLSource):
 
     def _run_actor(self, client, actor_id: str, run_input: dict) -> list[dict]:
         run = client.actor(actor_id).call(run_input=run_input)
-        dataset_id = (run or {}).get("defaultDatasetId")
+        dataset_id = _dataset_id(run)
         if not dataset_id:
             return []
         return list(client.dataset(dataset_id).iterate_items())

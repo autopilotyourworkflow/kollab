@@ -6,6 +6,7 @@ env late see what they set."""
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,6 +15,10 @@ from pathlib import Path
 # never overrides an already-set variable. Optional dep: the credential-free
 # minimal install without python-dotenv simply skips it.
 def _load_local_dotenv() -> None:
+    # Never read the developer's real .env during tests — the suite must be
+    # hermetic (each test sets its own env via monkeypatch).
+    if "pytest" in sys.modules:
+        return
     try:
         from dotenv import load_dotenv
     except ImportError:
