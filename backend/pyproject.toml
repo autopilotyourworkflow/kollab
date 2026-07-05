@@ -11,7 +11,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27"]
-live = ["apify-client>=1.7"]   # only needed for the recorded live Apify run
+# Live paths (Apify sourcing, Claude/Gemini Brand DNA + rerank, site fetch).
+# The credential-free demo needs none of these; all imports are lazy.
+live = ["apify-client>=1.7", "anthropic>=0.40", "httpx>=0.27"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

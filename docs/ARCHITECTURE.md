@@ -68,22 +68,44 @@ lists each signal and its grounding.
   creators so cross-creator reuse validly fires.
 - **`apify.py`** — pure `parse_profile_item` / `parse_video_item` / `parse_comment_item`
   mappers (unit-tested; numeric `createTime` epochs are converted to ISO, and items without
-  a usable timestamp are dropped by `assemble_kol` because every detector is time-based).
-  The actor-run loop itself is **roadmap** — it lands with the recorded live run;
-  `fetch_candidates` raises a clear error and the API answers `503`, never a fake result.
-  Clearly labeled prototyping/public-data only.
+  a usable timestamp are dropped by `assemble_kol` because every detector is time-based),
+  plus the **budget-capped actor-run loop**: brief → search queries → tiktok-scraper video
+  items (author profile embedded) → group by author → per-creator comment sample, with a
+  `BudgetMeter` that pre-checks every fetch and stops *before* the projected spend crosses
+  the cap (`KOLLAB_RUN_BUDGET_USD`, default $5) — a partial-but-honest pull, never a
+  surprise bill. The client is injectable, so the whole loop is tested against a fake;
+  the first run against the real actors is a calibration run. Commenter-profile second-pass
+  enrichment is deliberately not pulled (cost) — without it the thin-commenter detector
+  withholds rather than guesses. Missing preconditions (no token, no `apify-client`)
+  surface as an honest `503` with the reason. Clearly labeled prototyping/public-data only.
 
 ### `app/matching/`
 - **`score.py`** — deterministic `build_factors` (topic / authenticity / recency / audience)
   and `fit_score` = normalized weighted sum of the soft factors. Audience carries weight
   **literally 0.0** and is excluded from the sum, so the "advisory only" label and the score
   tell one story.
-- **`rerank.py`** — the LLM-path interface plus a **pure, tested citation validator**:
-  `validate_citations` flags any `[[dp:*]]` citation outside the allowed payload; the
-  retry-capped `CitationValidator.enforce` returns a *"rationale withheld: citation check
-  failed"* badge on persistent failure, bounding latency and turning a hang into a visible
-  rigor signal. The LLM caller that will sit behind it is roadmap; today the deterministic
-  scorer stands in.
+- **`topic.py`** — deterministic lexical topic scoring for live sources (no curated
+  descriptor): caption/hashtag/bio overlap with the brief's category + pillars, the
+  rationale naming the exact matched terms. The LLM rerank refines the copy; it never
+  replaces this auditability.
+- **`rerank.py`** — a **pure, tested citation validator** (`validate_citations` flags any
+  `[[dp:*]]` citation outside the allowed payload; the retry-capped
+  `CitationValidator.enforce` returns a *"rationale withheld: citation check failed"* badge
+  on persistent failure) plus `apply_llm_rerank`: for each top-of-list KOL it enumerates
+  the citable data points from the computed payload, asks the LLM (Claude via `app/llm.py`)
+  for bilingual why-copy *with* citation markers, validates, then strips the markers for
+  display. Claims must cite to pass; any failure keeps the deterministic copy — the rerank
+  can refine, never block or fabricate. Off by default without a key
+  (`KOLLAB_LLM_RERANK=0` forces it off with one).
+
+### `app/ingest/`
+- **`brand_dna.py`** — website → `ClientBrief` with an explicit degradation chain:
+  **Claude → Gemini → rules-based skeleton**, each result naming its source and carrying
+  `degraded=True` when it fell to the skeleton (the UI badges it "degraded extraction").
+  An LLM response that fails JSON/schema validation falls through to the next tier — the
+  chain never fabricates a confident-looking brief. Fetch + both LLM callers are
+  injectable; the whole chain is tested with fakes. Exposed as `POST /api/brand-dna`
+  (works credential-free: you get the labeled skeleton).
 
 ### `app/trust/`
 - **`provenance.py`** — the measured / inferred tag on every match factor is sourced from
@@ -99,43 +121,46 @@ lists each signal and its grounding.
 ### `app/pipeline.py` + `app/main.py`
 `build_shortlist` wires it end-to-end and projects a real per-run cost from actual data volume
 using the verified Apify prices ($0.50/1k comments, $1.70/1k results). It prefers the dataset's
-own `as_of` date as "now" for deterministic recency. `main.py` exposes `/health` and
-`/api/shortlist` (GET default demo, POST with a brief) with CORS open to the Pages demo +
-localhost.
+own `as_of` date as "now" for deterministic recency. `main.py` exposes `/health`,
+`/api/shortlist` (GET default demo, POST with a brief; live-path preconditions answer 4xx/503
+with the reason) and `/api/brand-dna`, applies the LLM rerank when enabled, with CORS open to
+the Pages demo + localhost.
 
 ## Reliability & degradation
 
-Built in this repo:
-
+- **Brand ingest:** Claude → Gemini → rules-based skeleton, each response naming its
+  source; the skeleton is flagged `degraded` and the UI badges it *"degraded extraction."*
+- **Rerank:** validation-gated with a capped retry; any provider/parse/citation failure
+  keeps the deterministic copy (refine-only, never block). A stale-cache fallback for live
+  screen-shares (serve the last-cached adjudication with a stale badge) is roadmap.
 - **Citation validator:** retry-capped, then a visible "rationale withheld" badge.
+- **Sourcing budget:** every live fetch is pre-checked against the run cap; the loop stops
+  before crossing it and reports a partial pull honestly.
 - **Fixtures mode:** the default, so a reviewer never hits a rate limit.
-- **Unwired-path honesty:** selecting the Apify source returns a clean `503` with the reason;
-  no path silently degrades to a fabricated result.
-
-Designed for the LLM paths when they land (roadmap — policy, not shipped code):
-
-- **Brand ingest (new-input path):** Claude → Gemini → rules-based skeleton, badged
-  *"degraded extraction."*
-- **Rerank (cached path):** on LLM failure during a live screen-share, serve the last-cached
-  adjudication with a stale badge rather than erroring.
+- **Precondition honesty:** a live path missing its token/dependency answers a clean
+  `4xx/503` with the reason; no path silently degrades to a fabricated result.
 
 ## Testing
 
-73 tests (`backend/tests/`) on synthetic data: every detector (pod / burst / templated / thin
-/ ER-outlier / view-to-follower / boosted / dormancy) in both firing and silent cases, the
-withhold paths (min-cohort AND min-video-sample), vetting dedup + ordering + lexicon
-corroboration, deterministic scoring, honest-rationale rules (withheld peer check, dormancy
-not fraud-templated), the citation validator, the trust layer (confidence functions +
-provenance/advisory wiring), seed determinism incl. realized-ER == descriptor, the Apify
-mappers (ISO + epoch + dropped-unstamped cases), the 503 on the unwired source, and an
-end-to-end pipeline assertion that the seed shortlist reproduces the deployed UI's exact
-risk story and emits the camelCase contract.
+88 tests (`backend/tests/`) on synthetic data + fake clients: every detector (pod / burst /
+templated / thin / ER-outlier / view-to-follower / boosted / dormancy) in both firing and
+silent cases, the withhold paths (min-cohort AND min-video-sample), vetting dedup + ordering
++ lexicon corroboration, deterministic scoring, honest-rationale rules (withheld peer check,
+dormancy not fraud-templated), the citation validator AND the LLM rerank against fakes
+(citation-stripping, ghost-citation rejection, provider-failure survival), the Brand DNA
+degradation chain (Claude → Gemini → rules, unreachable-site case), the Apify actor loop
+against a fake client (assembly, tier/vertical inference, budget stop, refuse-before-spend),
+the trust layer, seed determinism incl. realized-ER == descriptor, the Apify mappers (ISO +
+epoch + dropped-unstamped cases), the 503/400 precondition answers, and an end-to-end
+pipeline assertion that the seed shortlist reproduces the deployed UI's exact risk story and
+emits the camelCase contract.
 
 ## Design decisions worth calling out
 
 - **No numpy.** stdlib `statistics` keeps the install light and portable; the math here
   (median, IQR, quantiles, Tukey outliers) doesn't need it.
-- **One LLM on the core path.** Fewer integration surfaces; model-quality is a v1 A/B lever
-  (Claude vs Gemini on the rerank rubric), noted rather than built now.
+- **One LLM on the core path.** Claude leads both LLM touchpoints (Brand DNA, rerank) with
+  Gemini strictly as a degradation fallback — fewer integration surfaces; Claude-vs-Gemini
+  as a quality A/B on the rerank rubric is a v1 lever, noted rather than built now.
 - **Determinism everywhere in fixtures mode.** Seeded RNG + dataset `as_of` → reproducible
   output, which is what makes the test suite meaningful and the demo dependable on camera.

@@ -8,23 +8,76 @@ Verified actor payloads (pre-flight spike, 2026-07-02):
   - clockworks/tiktok-scraper           $1.70 / 1k   → profile + video fields
   - clockworks/tiktok-comments-scraper  $0.50 / 1k   → per-comment fields
 
-The JSON→RawKOL mappers below are pure and unit-tested against the documented actor
-payloads. The actor-run loop itself is NOT wired in this build (roadmap — it lands
-with the recorded live run): fetch_candidates raises a clear error rather than
-pretending, and the API turns that into a 503.
+The JSON→RawKOL mappers are pure and unit-tested against the documented actor
+payloads. The actor-run loop below is budget-capped end-to-end (it stops fetching
+BEFORE the projected spend crosses the cap) and takes an injectable client so the
+whole loop is tested against a fake; the first live run against the real actors is
+a calibration run (actor input schemas are documented but only output schemas were
+spike-verified).
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timezone
 from zlib import crc32
 
+from app.config import PRICE_PER_1K_COMMENTS, PRICE_PER_1K_RESULTS
+from app.matching.topic import keyword_topic_score
 from app.raw import RawComment, RawKOL, RawProfile, RawVideo
 from app.schemas import ClientBrief
 from app.sources.base import KOLSource, Presentation
 
 TIKTOK_SCRAPER_ACTOR = "clockworks/tiktok-scraper"
 TIKTOK_COMMENTS_ACTOR = "clockworks/tiktok-comments-scraper"
+
+# Tier bands aligned with the seed cohort's labeling (k8 239K = mid, k4 486K = macro).
+TIER_MID_MIN = 100_000
+TIER_MACRO_MIN = 400_000
+
+# Placeholder vertical taxonomy for the prototyping adapter — production verticals
+# come from the licensed feed's own taxonomy, not keyword guessing.
+_VERTICAL_KEYWORDS = {
+    "beauty": ("skincare", "beauty", "cosmetic", "makeup", "สกินแคร์", "บิวตี้"),
+    "food": ("food", "restaurant", "cafe", "snack", "อาหาร", "คาเฟ่"),
+}
+
+
+def infer_tier(fans: int) -> str:
+    if fans >= TIER_MACRO_MIN:
+        return "macro"
+    if fans >= TIER_MID_MIN:
+        return "mid"
+    return "micro"
+
+
+def infer_vertical(brief: ClientBrief) -> str:
+    text = f"{brief.category} {' '.join(brief.pillars)}".lower()
+    for vertical, words in _VERTICAL_KEYWORDS.items():
+        if any(w in text for w in words):
+            return vertical
+    return "lifestyle"
+
+
+class BudgetMeter:
+    """Hard USD cap for one sourcing run. Every fetch is pre-checked: the run stops
+    BEFORE the projected spend crosses the cap — a partial-but-honest pull, never a
+    surprise bill."""
+
+    def __init__(self, cap_usd: float):
+        self.cap_usd = float(cap_usd)
+        self.results = 0   # tiktok-scraper items (videos + profile rows)
+        self.comments = 0  # comments-scraper items
+
+    @property
+    def spent_usd(self) -> float:
+        return round(self.results / 1000 * PRICE_PER_1K_RESULTS
+                     + self.comments / 1000 * PRICE_PER_1K_COMMENTS, 4)
+
+    def can_afford(self, extra_results: int = 0, extra_comments: int = 0) -> bool:
+        projected = ((self.results + extra_results) / 1000 * PRICE_PER_1K_RESULTS
+                     + (self.comments + extra_comments) / 1000 * PRICE_PER_1K_COMMENTS)
+        return projected <= self.cap_usd
 
 
 def _to_iso(ts) -> str:
@@ -104,30 +157,132 @@ def assemble_kol(profile_item: dict, video_items: list[dict], comment_items: lis
 
 
 class ApifyAdapter(KOLSource):
+    """Budget-capped live sourcing loop:
+
+      1. search the tiktok-scraper with brief-derived queries → video items
+         (each carries its author's profile in `authorMeta`)
+      2. group by author, keep the creators with the most on-query videos
+      3. per creator (budget permitting), pull a comment sample for their top posts
+      4. hand every raw item to the pure mappers above → RawKOL
+
+    `client` is injectable (tests pass a fake mirroring apify_client's surface:
+    .actor(id).call(run_input=...) -> {"defaultDatasetId"} and
+    .dataset(id).iterate_items()). Commenter-profile second-pass enrichment is
+    deliberately NOT pulled here (cost); without it the thin-commenter detector
+    withholds rather than guesses — the documented honest behavior.
+    """
+
     name = "apify"
 
-    def __init__(self, token: str | None = None):
+    def __init__(self, token: str | None = None, budget_usd: float = 5.0,
+                 client=None, max_creators: int = 12, videos_per_creator: int = 20,
+                 comments_per_creator: int = 120, results_per_query: int = 100):
         self.token = token
+        self.budget = BudgetMeter(budget_usd)
+        self._client = client
+        self.max_creators = max_creators
+        self.videos_per_creator = videos_per_creator
+        self.comments_per_creator = comments_per_creator
+        self.results_per_query = results_per_query
+        self._brief: ClientBrief | None = None
+        self.last_run: dict = {}
 
-    def fetch_candidates(self, brief: ClientBrief) -> list[RawKOL]:
+    # ── client plumbing ─────────────────────────────────────────────────────
+    def _get_client(self):
+        if self._client is not None:
+            return self._client
         if not self.token:
             raise RuntimeError(
                 "ApifyAdapter needs APIFY_TOKEN. The credential-free demo uses "
                 "SeedDatasetSource; enable Apify only for the recorded live run."
             )
-        # NOT WIRED IN THIS BUILD (see README roadmap). The actor→RawKOL mappers
-        # above are the tested seam; the thin actor-run loop (run the two actors,
-        # read dataset items, hand the JSON to the mappers) ships with the recorded
-        # live run. The API surfaces this as a clean 503, never a silent fake result.
-        raise NotImplementedError(
-            "Live Apify sourcing is not wired in this build — the mappers are the "
-            "tested seam; the actor-run loop lands with the recorded live run. "
-            "The demo runs entirely on SeedDatasetSource."
-        )
+        try:
+            from apify_client import ApifyClient  # optional dep: pip install .[live]
+        except ImportError as e:
+            raise RuntimeError(
+                "apify-client not installed — `pip install apify-client` "
+                "(or `pip install -e .[live]`) for the live run."
+            ) from e
+        return ApifyClient(self.token)
+
+    def _run_actor(self, client, actor_id: str, run_input: dict) -> list[dict]:
+        run = client.actor(actor_id).call(run_input=run_input)
+        dataset_id = (run or {}).get("defaultDatasetId")
+        if not dataset_id:
+            return []
+        return list(client.dataset(dataset_id).iterate_items())
+
+    # ── the loop ────────────────────────────────────────────────────────────
+    def fetch_candidates(self, brief: ClientBrief) -> list[RawKOL]:
+        if brief is None:
+            raise ValueError("ApifyAdapter needs a ClientBrief to derive search queries.")
+        self._brief = brief
+        client = self._get_client()
+
+        # 1) search: brief-derived queries -> video items (author profile embedded)
+        queries = search_queries_from_brief(brief)
+        est_results = self.results_per_query * len(queries)
+        if not self.budget.can_afford(extra_results=est_results):
+            raise RuntimeError(
+                f"Search phase alone (~{est_results} results) would exceed the "
+                f"${self.budget.cap_usd:.2f} run budget — raise KOLLAB_RUN_BUDGET_USD "
+                f"or narrow the brief."
+            )
+        video_items = self._run_actor(client, TIKTOK_SCRAPER_ACTOR, {
+            "searchQueries": queries,
+            "resultsPerPage": self.results_per_query,
+        })
+        self.budget.results += len(video_items)
+
+        # 2) group by author; most on-query videos first (relevance proxy)
+        by_author: dict[str, list[dict]] = defaultdict(list)
+        for item in video_items:
+            author_id = str((item.get("authorMeta") or {}).get("id") or "")
+            if author_id:
+                by_author[author_id].append(item)
+        ranked_authors = sorted(by_author, key=lambda a: len(by_author[a]), reverse=True)
+
+        # 3) per creator: comment sample for their top posts, budget-gated
+        vertical = infer_vertical(brief)
+        kols: list[RawKOL] = []
+        partial = False
+        for author_id in ranked_authors[: self.max_creators]:
+            vids = sorted(by_author[author_id],
+                          key=lambda v: int((v.get("stats") or v).get("playCount") or 0),
+                          reverse=True)[: self.videos_per_creator]
+            post_urls = [v.get("webVideoUrl") for v in vids[:3] if v.get("webVideoUrl")]
+            want_comments = self.comments_per_creator if post_urls else 0
+            if not self.budget.can_afford(extra_comments=want_comments):
+                partial = True  # honest partial pull: stop before crossing the cap
+                break
+            comment_items: list[dict] = []
+            if post_urls:
+                comment_items = self._run_actor(client, TIKTOK_COMMENTS_ACTOR, {
+                    "postURLs": post_urls,
+                    "commentsPerPost": max(1, want_comments // len(post_urls)),
+                })
+                self.budget.comments += len(comment_items)
+            profile_item = vids[0]  # authorMeta rides on every video item
+            fans = int(((profile_item.get("authorMeta") or {}).get("fans")) or 0)
+            kols.append(assemble_kol(profile_item, vids, comment_items,
+                                     vertical=vertical, tier=infer_tier(fans)))
+
+        self.last_run = {
+            "queries": queries,
+            "creators": len(kols),
+            "results": self.budget.results,
+            "comments": self.budget.comments,
+            "spent_usd": self.budget.spent_usd,
+            "cap_usd": self.budget.cap_usd,
+            "partial": partial or len(ranked_authors) > self.max_creators,
+        }
+        return kols
 
     def presentation(self, kol: RawKOL) -> Presentation:
         handle = kol.profile.unique_id.lstrip("@")
         initials = (handle[:2] or "kk").upper()
+        topic, topic_rationale = (keyword_topic_score(self._brief, kol)
+                                  if self._brief else (0, None))
         return Presentation(
             id=kol.profile.author_id or handle,
             name=kol.profile.nickname or handle,
@@ -135,9 +290,28 @@ class ApifyAdapter(KOLSource):
             category_th="",
             avatar_initials=initials,
             avatar_hue=crc32(handle.encode()) % 360,
-            topic_score=0,      # requires the embeddings/LLM rerank path (roadmap)
-            audience_score=0,   # advisory; inference is roadmap
+            topic_score=topic,           # deterministic lexical fallback; LLM rerank refines
+            topic_rationale=topic_rationale,
+            audience_score=0,            # advisory only; audience inference needs licensed data
+            audience_rationale="No audience inference on the public-data path.",
             brand_safety_status="clear",
             conflict_status="clear",
             hitl="pending",
         )
+
+
+def search_queries_from_brief(brief: ClientBrief, max_queries: int = 3) -> list[str]:
+    """Brief -> a few short TikTok search queries: the category head plus the most
+    concrete pillars. Deliberately simple and inspectable — query strategy is a
+    calibration lever for the live run, not hidden magic."""
+    queries: list[str] = []
+    head = brief.category.split("/")[0].strip().lower()
+    if head:
+        queries.append(head)
+    for pillar in brief.pillars:
+        p = pillar.strip().lower()
+        if p and p not in queries:
+            queries.append(p)
+        if len(queries) >= max_queries:
+            break
+    return queries[:max_queries] or ["skincare"]

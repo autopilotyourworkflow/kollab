@@ -21,13 +21,13 @@ A follower-count tool recommends the 486K-follower creator with 9.1% engagement.
 
 ## What it does
 
-A 7-step pipeline, each output tagged with provenance and grounded to a real data point. Steps marked *(roadmap)* are designed but not in this build — the code never pretends otherwise (selecting an unwired path returns an honest 503, not a fake result):
+A 7-step pipeline, each output tagged with provenance and grounded to a real data point. The live paths switch on with API keys and **degrade honestly without them** — an unavailable path answers a clear 4xx/503 or a labeled fallback, never a fabricated result:
 
-1. **Brand DNA** — the demo ships a curated brief with editable, persisted account-manager overrides. Live website → `BrandProfile` extraction (Claude → Gemini → rules-based skeleton, badged *"degraded extraction"*) is *(roadmap)*.
-2. **Candidate sourcing** — via a swappable `KOLSource` adapter. `SeedDatasetSource` (curated, always-on demo) today; `ApifyAdapter` (public-data sampling, prototyping only) has its actor→model mappers built and unit-tested, with the actor-run loop landing with the recorded live run *(roadmap)*. Production target = a licensed feed behind the same interface.
+1. **Brand DNA** — `POST /api/brand-dna` turns a client website into a structured brief via **Claude → Gemini → rules-based skeleton**, every response naming its source and flagging degraded extraction (with no keys you get the honestly-labeled skeleton). The demo ships a curated brief with editable, persisted account-manager overrides.
+2. **Candidate sourcing** — via a swappable `KOLSource` adapter. `SeedDatasetSource` (curated, always-on demo) or `ApifyAdapter` (public-data sampling, prototyping only): a **budget-capped actor-run loop** — default $5/run, it stops *before* crossing the cap — over unit-tested actor→model mappers. Supply `APIFY_TOKEN` and POST a brief to run it; the first live run is a calibration run. Production target = a licensed feed behind the same interface.
 3. **Enrichment** — profile + recent videos + captions → content DNA, every derived field carrying a provenance tag (measured / inferred), and every inferred field an advisory that travels with the data: *"do not quote to client as fact."*
 4. **Authenticity / fraud vetting (the hero)** — structural-first signals, graded against a pre-computed reference cohort, each badge naming the triggered signal and the distribution (with *n*) it was measured against. See below.
-5. **Explainable match** — deterministic, citation-grounded factor scoring today. The upgrade path — embedding retrieve (recall) → LLM rerank (precision) — is *(roadmap)*, and the post-hoc validator that will gate it (rejecting any claim citing a data point not in the payload) is already built and tested.
+5. **Explainable match** — deterministic, citation-grounded factor scoring always; with a key, an **LLM rerank** rewrites the top-of-list why-copy but may only cite enumerated data points (`[[dp:*]]`) and must pass a post-hoc validator — uncited claims are rejected and the deterministic copy stays. Embedding retrieval for recall at licensed-feed scale is *(roadmap)*.
 6. **Brand-safety + commercial-conflict gate** — two named checks, flag-for-human (never silent auto-exclude), each trigger routed to review with the offending term shown.
 7. **Client-ready output** — interactive shortlist with live filter/re-rank and HITL approve/reject/override.
 
@@ -55,25 +55,25 @@ Every threshold is a named, documented, retunable constant (`app/fraud/signals.p
 
 ## Live vs. computed
 
-The frontend fetches `GET /api/shortlist` over HTTP and renders whatever the pipeline computed — every count, badge, and rationale on screen derives from that payload (the footer names the active source). On the hosted demo the endpoint is a Cloudflare Pages Function serving the **Python pipeline's own output** (regeneration command documented in `frontend/functions/api/shortlist.ts`); point `VITE_API_URL` at a running FastAPI instance for live per-request compute. If the API is unreachable, the bundled fallback keeps the demo alive — and it **imports the same committed payload the Function serves**, so fallback and API are byte-identical by construction. The fraud verdicts are computed **from first principles** on Apify-shaped data (see the 73-test suite); a live Apify pull or a licensed feed slots in behind the same `KOLSource` interface (mappers built + tested; the actor-run loop is roadmap).
+The frontend fetches `GET /api/shortlist` over HTTP and renders whatever the pipeline computed — every count, badge, and rationale on screen derives from that payload (the footer names the active source). On the hosted demo the endpoint is a Cloudflare Pages Function serving the **Python pipeline's own output** (regeneration command documented in `frontend/functions/api/shortlist.ts`); point `VITE_API_URL` at a running FastAPI instance (see `render.yaml`) for live per-request compute. If the API is unreachable, the bundled fallback keeps the demo alive — and it **imports the same committed payload the Function serves**, so fallback and API are byte-identical by construction. The fraud verdicts are computed **from first principles** on Apify-shaped data (see the 88-test suite); the live Apify pull runs behind the same `KOLSource` interface (budget-capped loop + mappers, tested against a fake client; first live run = calibration), and a licensed feed is one more adapter.
 
 ## Architecture
 
 ```
                        ┌──────────────────────────────────────────┐
-  client website  ──▶  │  Brand DNA (Claude → Gemini → rules)      │  (roadmap; demo =
-                       └──────────────────────────────────────────┘   curated brief + edits)
+  client website  ──▶  │  Brand DNA (Claude → Gemini → rules)      │  keys optional: with
+                       └──────────────────────────────────────────┘  none, a labeled skeleton
                                         │  BrandProfile
                                         ▼
    KOLSource adapter  ┌───────────┐   candidates   ┌──────────────┐
    Seed | Apify | ──▶ │  enrich   │ ─────────────▶ │  fraud vet   │  structural-first,
    licensed feed      └───────────┘                │  + cohorts   │  cohort-anchored, n≥15
-                                                    └──────────────┘
+   ($-capped loop)                                  └──────────────┘
                                         │  Risk + authenticity
                                         ▼
                        ┌──────────────────────────────────────────┐
-                       │  match: deterministic factor scoring →    │  (LLM rerank roadmap;
-                       │  citation validator → rank                │   validator built)
+                       │  match: deterministic factor scoring →    │  LLM rerank (with key)
+                       │  LLM rerank → citation validator → rank   │  must cite [[dp:*]] ids
                        └──────────────────────────────────────────┘
                                         │  ShortlistResponse (camelCase contract)
                                         ▼
@@ -81,7 +81,7 @@ The frontend fetches `GET /api/shortlist` over HTTP and renders whatever the pip
 ```
 
 - **Frontend:** Vite + React 19 + TypeScript + Tailwind v4, deployed on Cloudflare Pages.
-- **Backend:** Python + FastAPI + Pydantic v2. Pure-stdlib statistics (no numpy) so install stays light. LLM-free by design in this build (deterministic, citation-grounded scoring); the planned LLM path (Claude, with a Gemini/rules degradation chain) slots in behind the already-built citation validator.
+- **Backend:** Python + FastAPI + Pydantic v2. Pure-stdlib statistics (no numpy) so install stays light. **LLM-optional by design:** deterministic, citation-grounded scoring runs with zero keys; with a key, Claude (Gemini fallback) powers Brand DNA and a rerank that must pass the citation validator. Live backend deploys via `render.yaml`.
 - **Data contract:** a single Pydantic → camelCase model shared by both ends.
 
 Full detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Data ethics / PDPA / ToS stance: [docs/ETHICS.md](docs/ETHICS.md).
@@ -96,16 +96,19 @@ backend/
   app/
     schemas.py     output contract (mirrors frontend/src/lib/types.ts)
     raw.py         Apify-shaped ingestion models
+    ingest/        Brand DNA: website → brief (Claude → Gemini → rules skeleton)
     fraud/         cohort stats + structural detectors + vetting orchestration  ← the hero
-    sources/       KOLSource interface + Seed (fixtures) + Apify adapter
-    matching/      deterministic scoring + citation-grounded rerank + validator
+    sources/       KOLSource interface + Seed (fixtures) + Apify budget-capped loop
+    matching/      deterministic scoring + lexical topic fallback + LLM rerank + validator
     trust/         provenance + deterministic confidence
+    llm.py         thin Claude/Gemini callers (lazy imports; fakes in tests)
     pipeline.py    brief → enrich → vet → match → rank → ShortlistResponse
-    main.py        FastAPI app (/health, /api/shortlist)
-  tests/           73 unit + integration tests (synthetic data)
+    main.py        FastAPI app (/health, /api/shortlist, /api/brand-dna)
+  tests/           88 unit + integration tests (synthetic data + fake clients)
   eval/            labeling rubric + labels + precision@k / recall@k harness
 ops/n8n/           importable re-vet + alert workflow (cron + manual webhook)
 docs/              architecture + ethics + eval report + screenshots
+render.yaml        one-click live backend deploy (Render blueprint)
 ```
 
 ## Run it locally
@@ -131,7 +134,7 @@ python -m venv .venv
 .venv/bin/python -m uvicorn app.main:app --reload           # .venv\Scripts\python -m uvicorn app.main:app --reload
 ```
 
-The API serves docs at http://127.0.0.1:8000/docs. `GET /api/shortlist` returns the Glow Lab demo shortlist. Zero credentials required — the optional keys in `backend/.env.example` are read and surfaced in `/health`, but the live paths they belong to (Apify actor loop, LLM Brand-DNA/rerank) are roadmap; selecting the Apify source returns an honest `503`, never a fabricated result.
+The API serves docs at http://127.0.0.1:8000/docs. `GET /api/shortlist` returns the Glow Lab demo shortlist. Zero credentials required. The optional keys in `backend/.env.example` switch on the live paths — the budget-capped Apify sourcing loop, `POST /api/brand-dna`, and the citation-validated LLM rerank (`pip install -e .[live]` for their SDKs). Without keys, every live path answers an honest `4xx/503` with the reason or a clearly-labeled degraded fallback — never a fabricated result. Deploy it live with the repo-root `render.yaml`.
 
 ## Business framing (method, not fabricated numbers)
 
@@ -139,9 +142,9 @@ The headline is **workflow ROI**: a shortlist that takes an account manager hour
 
 ## What's built vs. roadmap
 
-**Built:** deployed demo served by the pipeline API over HTTP (bundled fallback = the same committed payload) · structural-first fraud vetting with cohort math + min-n rule + Thai-lexicon pod corroboration · KOLSource adapter (Seed + unit-tested Apify mappers) · deterministic matching + citation validator · provenance tags + inferred-field advisory on every factor · pipeline-derived cost meter · 73-test suite · **eval harness** (rubric + labels + precision@k/recall@k, [docs/EVAL.md](docs/EVAL.md)) · **n8n re-vet + alert workflow** ([ops/n8n](ops/n8n/), cron + manual webhook) · editable persisted brand brief · Comfortable/Spacious density toggle · WCAG-minded a11y pass (skip link, aria-live, keyboard menu, reduced-motion).
+**Built:** deployed demo served by the pipeline API over HTTP (bundled fallback = the same committed payload) · structural-first fraud vetting with cohort math + min-n rule + Thai-lexicon pod corroboration · KOLSource adapter: Seed + the **budget-capped Apify sourcing loop** (fake-client tested; token-activated) · **Brand DNA chain** (Claude → Gemini → rules skeleton, `/api/brand-dna`, source-labeled + degraded-flagged) · deterministic matching + lexical topic fallback + **citation-validated LLM rerank** (uncited claims rejected, deterministic copy stays) · provenance tags + inferred-field advisory on every factor · pipeline-derived cost meter · 88-test suite · **eval harness** (rubric + labels + precision@k/recall@k, [docs/EVAL.md](docs/EVAL.md)) · **n8n re-vet + alert workflow** ([ops/n8n](ops/n8n/), cron + manual webhook) · editable persisted brand brief · Render deploy blueprint · Comfortable/Spacious density toggle · WCAG-minded a11y pass (skip link, aria-live, keyboard menu, reduced-motion).
 
-**Roadmap:** live Brand DNA (Claude → Gemini → rules) + the Apify actor-run loop / licensed pull · embeddings/pgvector retrieval + LLM rerank behind the citation validator · surfacing the computed-confidence functions (`app/trust/confidence.py`, built + tested) in the API contract and UI · re-labeling the eval on the live seed cohort (2 brands × 20) · PDF deck export · Thai-native validation of the taboo list + comment lexicon · rate/tier learned from agency deal history.
+**Roadmap:** first live calibration run against the real actors + the recorded live-extraction demo · embeddings/pgvector retrieval for recall at licensed-feed scale · persisted multi-run store for shortlists + HITL decisions · surfacing the computed-confidence functions (`app/trust/confidence.py`, built + tested) in the API contract and UI · re-labeling the eval on the live seed cohort (2 brands × 20) · PDF deck export · Thai-native validation of the taboo list + comment lexicon · rate/tier learned from agency deal history.
 
 ## Status
 

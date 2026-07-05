@@ -122,3 +122,14 @@ class ShortlistResponse(CamelModel):
     cost: CostMeter
     source: str  # "seed" | "apify" — which adapter produced the candidates
     degraded: bool = False  # True if brand ingest fell back to a lower tier
+
+
+class BrandDnaRequest(CamelModel):
+    website: str
+
+
+class BrandDnaResponse(CamelModel):
+    brief: ClientBrief
+    degraded: bool  # True when extraction fell back to the rules skeleton
+    source: str     # "claude" | "gemini" | "rules"
+    note: str = ""

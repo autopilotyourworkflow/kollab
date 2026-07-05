@@ -8,6 +8,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+# Apify actor prices, verified in the pre-flight spike (2026-07-02). Used both to
+# project the cost meter and to enforce the live-run budget cap.
+PRICE_PER_1K_COMMENTS = 0.50   # clockworks/tiktok-comments-scraper
+PRICE_PER_1K_RESULTS = 1.70    # clockworks/tiktok-scraper
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
@@ -17,6 +22,16 @@ def _env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError as e:
         raise RuntimeError(f"{name} must be an integer, got {raw!r}") from e
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError as e:
+        raise RuntimeError(f"{name} must be a number, got {raw!r}") from e
 
 
 @dataclass(frozen=True)
@@ -34,6 +49,20 @@ class Settings:
     # Minimum cohort size before an outlier signal is allowed to fire. Below this
     # the badge reads "insufficient baseline — signal withheld" (see fraud.cohort).
     min_cohort_n: int = field(default_factory=lambda: _env_int("KOLLAB_MIN_COHORT_N", 15))
+
+    # Hard USD cap for one live Apify sourcing run. The adapter stops fetching
+    # before the projected spend crosses this line (never mid-actor surprises).
+    run_budget_usd: float = field(default_factory=lambda: _env_float("KOLLAB_RUN_BUDGET_USD", 5.0))
+
+    # LLM models (env-overridable). Claude leads; Gemini is the degradation fallback.
+    claude_model: str = field(default_factory=lambda: os.getenv("KOLLAB_CLAUDE_MODEL", "claude-sonnet-5"))
+    gemini_model: str = field(default_factory=lambda: os.getenv("KOLLAB_GEMINI_MODEL", "gemini-2.5-flash"))
+
+    # LLM rerank of the top of the shortlist (citation-validated). On by default
+    # when a key exists; force off with KOLLAB_LLM_RERANK=0.
+    llm_rerank: bool = field(
+        default_factory=lambda: os.getenv("KOLLAB_LLM_RERANK", "1").strip().lower() not in ("0", "false", "no")
+    )
 
     @property
     def apify_enabled(self) -> bool:

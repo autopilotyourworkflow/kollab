@@ -1,0 +1,27 @@
+# Render blueprint: deploys the FastAPI judgment layer as a live backend.
+# One-click from the Render dashboard (New > Blueprint > point at this repo).
+# The Cloudflare Pages demo stays up regardless — it serves the committed
+# pipeline output; set VITE_API_URL at Pages build time to point the UI here
+# for live per-request compute.
+services:
+  - type: web
+    name: kollab-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt && pip install -e .[live]
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.4"
+      - key: KOLLAB_SOURCE
+        value: seed            # flip to apify (with APIFY_TOKEN set) for live sourcing
+      - key: KOLLAB_RUN_BUDGET_USD
+        value: "5"
+      - key: APIFY_TOKEN
+        sync: false            # set in the Render dashboard, never in the repo
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

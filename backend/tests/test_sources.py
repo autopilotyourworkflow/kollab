@@ -92,11 +92,17 @@ def test_apify_assemble_drops_unstamped_items():
     assert kol.comments == []
 
 
-def test_apify_not_wired_raises_clearly():
-    with pytest.raises(NotImplementedError):
-        ApifyAdapter(token="dummy").fetch_candidates(brief=None)
+def test_apify_without_client_lib_raises_clearly():
+    from tests.test_live_paths import BRIEF
+
+    # Token present but apify-client not installed (the credential-free install):
+    # a clear RuntimeError naming the missing dependency, never a fake result.
+    with pytest.raises(RuntimeError, match="apify-client"):
+        ApifyAdapter(token="dummy").fetch_candidates(brief=BRIEF)
 
 
 def test_apify_requires_token():
-    with pytest.raises(RuntimeError):
-        ApifyAdapter(token=None).fetch_candidates(brief=None)
+    from tests.test_live_paths import BRIEF
+
+    with pytest.raises(RuntimeError, match="APIFY_TOKEN"):
+        ApifyAdapter(token=None).fetch_candidates(brief=BRIEF)

@@ -22,6 +22,53 @@ import { cn } from "../lib/cn"
 
 type Phase = "input" | "analyzing" | "review" | "error"
 
+/** A non-degraded extraction from the live backend (POST /api/brand-dna). */
+type LiveExtraction = { brand: string; brandTh: string; category: string; source: string }
+
+/** Try the real Brand-DNA endpoint (Claude → Gemini on the backend). Returns null
+    when there is no live backend, the call fails, or the backend answered with the
+    honestly-degraded rules skeleton — the UI then keeps its labeled demo path. */
+async function tryLiveBrandDna(website: string): Promise<{
+  live: LiveExtraction | null
+  brief?: { audience?: string; region?: string; pillars?: string[] }
+}> {
+  // Only when a live backend is configured — the static demo hosting has no
+  // /api/brand-dna, so probing it would just log 404 noise.
+  const base = import.meta.env.VITE_API_URL as string | undefined
+  if (!base) return { live: null }
+  try {
+    const ctrl = new AbortController()
+    const t = window.setTimeout(() => ctrl.abort(), 12_000)
+    const res = await fetch(`${base}/api/brand-dna`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ website }),
+      signal: ctrl.signal,
+    })
+    window.clearTimeout(t)
+    if (!res.ok) return { live: null }
+    const data = (await res.json()) as {
+      degraded?: boolean
+      source?: string
+      brief?: { brand?: string; brandTh?: string; category?: string; audience?: string; region?: string; pillars?: string[] }
+    }
+    if (data?.degraded === false && typeof data.brief?.brand === "string" && data.brief.brand) {
+      return {
+        live: {
+          brand: data.brief.brand,
+          brandTh: data.brief.brandTh ?? "",
+          category: data.brief.category ?? "",
+          source: data.source ?? "llm",
+        },
+        brief: data.brief,
+      }
+    }
+    return { live: null }
+  } catch {
+    return { live: null } // static hosting / offline: the demo path takes over
+  }
+}
+
 function Field({
   label,
   provenance,
@@ -71,7 +118,9 @@ export function NewShortlist() {
     requestAnimationFrame(() => addPillarRef.current?.focus())
   }
 
-  const analyze = () => {
+  const [live, setLive] = useState<LiveExtraction | null>(null)
+
+  const analyze = async () => {
     const cleaned = url.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "")
     if (!/^([\w-]+\.)+[a-z]{2,}(\/.*)?$/i.test(cleaned)) {
       setError("Enter a valid website — e.g. glowlab.co.th")
@@ -80,7 +129,21 @@ export function NewShortlist() {
     setError(null)
     setPhase("analyzing")
     const willFail = /fail|error|unreachable|broken/i.test(cleaned)
-    window.setTimeout(() => setPhase(willFail ? "error" : "review"), 1700)
+    const startedAt = Date.now()
+
+    // Real extraction first (live backend + LLM key); the labeled demo path
+    // takes over on any miss — never a fake green badge.
+    const result = await tryLiveBrandDna(cleaned)
+    setLive(result.live)
+    if (result.live && result.brief) {
+      if (result.brief.audience) setAudience(result.brief.audience)
+      if (result.brief.region) setRegion(result.brief.region)
+      if (result.brief.pillars?.length) setPillars(result.brief.pillars)
+    }
+
+    // keep the reading state legible even when the answer is instant
+    const waitLeft = Math.max(300, 1700 - (Date.now() - startedAt))
+    window.setTimeout(() => setPhase(willFail && !result.live ? "error" : "review"), waitLeft)
   }
 
   return (
@@ -230,15 +293,20 @@ export function NewShortlist() {
               <Sparkles size={15} />
             </span>
             <h1 className="text-[22px] font-bold tracking-[-0.01em] text-ink">Brand DNA</h1>
-            {/* honest badge: a green "extracted" claim only when the demo actually
-                extracted this brand; anything else is a labeled draft */}
-            {known ? (
+            {/* honest badge: a green "extracted" claim only when extraction actually
+                ran (live LLM path, or the demo's covered brand); anything else is a
+                labeled draft */}
+            {live ? (
+              <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-verified-bg px-2 py-0.5 text-[11px] font-medium text-verified-fg">
+                <ShieldCheck size={12} /> extracted live from {url} · via {live.source}
+              </span>
+            ) : known ? (
               <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-verified-bg px-2 py-0.5 text-[11px] font-medium text-verified-fg">
                 <ShieldCheck size={12} /> extracted from {url || "glowlab.co.th"}
               </span>
             ) : (
               <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-risk-med-bg px-2 py-0.5 text-[11px] font-medium text-risk-med-fg">
-                <AlertTriangle size={12} /> draft brief — demo extraction covers glowlab.co.th only
+                <AlertTriangle size={12} /> draft brief — live extraction unavailable here
               </span>
             )}
           </div>
@@ -246,23 +314,26 @@ export function NewShortlist() {
             This is what Kollab understood about the brand. Edit anything, then find matching KOLs.
           </p>
 
-          {!known && (
+          {!live && !known && (
             <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-risk-med-border bg-risk-med-bg px-3.5 py-2.5">
               <AlertTriangle size={16} className="mt-0.5 shrink-0 text-risk-med-fg" />
               <p className="text-[12px] leading-relaxed text-ink-700">
                 <span className="font-semibold text-risk-med-fg">Demo boundary.</span> Live extraction for arbitrary
-                brands needs the Claude/Gemini path (roadmap) — the fields below are the sample brief, shown so you
-                can see and edit the review flow. Treat every value as a draft.
+                brands runs on the backend's Claude → Gemini path (<code>POST /api/brand-dna</code> with an LLM key) —
+                this hosted demo doesn't carry keys, so the fields below are the sample brief, shown so you can see
+                and edit the review flow. Treat every value as a draft.
               </p>
             </div>
           )}
 
           <div className="mt-5 space-y-5 rounded-2xl border border-border bg-white p-6 shadow-sm">
             <div className="flex items-baseline gap-2 border-b border-border pb-4">
-              <span className="text-[19px] font-bold text-ink">{client.brand}</span>
-              <span className="font-thai text-[15px] text-ink-400">· {client.brandTh}</span>
+              <span className="text-[19px] font-bold text-ink">{live?.brand ?? client.brand}</span>
+              {(live ? live.brandTh : client.brandTh) && (
+                <span className="font-thai text-[15px] text-ink-400">· {live?.brandTh ?? client.brandTh}</span>
+              )}
               <span className="ml-auto rounded-full bg-panel px-2.5 py-1 text-[12px] font-medium text-ink-700">
-                {client.category}
+                {live?.category ?? client.category}
               </span>
             </div>
 

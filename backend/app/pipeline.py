@@ -7,6 +7,7 @@ zero credentials on SeedDatasetSource; the same code path serves the ApifyAdapte
 
 from __future__ import annotations
 
+from app.config import PRICE_PER_1K_COMMENTS, PRICE_PER_1K_RESULTS
 from app.fraud.cohort import engagement_rate, median_views
 from app.fraud.vet import _reference_now, vet_cohort
 from app.matching.score import build_factors, fit_score
@@ -20,10 +21,6 @@ from app.schemas import (
     ShortlistResponse,
 )
 from app.sources.base import KOLSource
-
-# Apify actor prices (pre-flight spike) — used to project a real per-run cost.
-PRICE_PER_1K_COMMENTS = 0.50
-PRICE_PER_1K_RESULTS = 1.70
 
 
 def _last_posted_days(kol: RawKOL, now) -> int:
