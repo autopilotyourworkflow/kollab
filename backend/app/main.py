@@ -7,14 +7,13 @@ SeedDatasetSource. CORS is open to the Pages demo + localhost dev.
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.config import get_settings
 from app.pipeline import build_shortlist
 from app.schemas import ClientBrief, ShortlistResponse
-from app.sources.apify import ApifyAdapter
 from app.sources.seed import SeedDatasetSource
 
 app = FastAPI(
@@ -37,8 +36,15 @@ app.add_middleware(
 
 def _make_source():
     settings = get_settings()
-    if settings.source == "apify" and settings.apify_enabled:
-        return ApifyAdapter(settings.apify_token)
+    if settings.source == "apify":
+        # Honest fail-fast: the Apify actor-run loop is roadmap (the mappers are the
+        # tested seam) — answer 503 with the truth instead of a 500 or a fake result.
+        raise HTTPException(
+            status_code=503,
+            detail="Live Apify sourcing is not wired in this build — the adapter's "
+                   "actor→RawKOL mappers are unit-tested, but the actor-run loop lands "
+                   "with the recorded live run. Unset KOLLAB_SOURCE to use the seed dataset.",
+        )
     return SeedDatasetSource()
 
 

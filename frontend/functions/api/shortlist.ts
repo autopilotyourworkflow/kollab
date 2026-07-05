@@ -3,11 +3,14 @@
 // Serves the Python pipeline's output so the hosted demo answers over real HTTP
 // with the same ShortlistResponse contract as the FastAPI backend. The payload
 // is generated at build time by the actual pipeline (backend/app/pipeline.py,
-// seed fixtures mode) — regenerate with:
-//   cd backend && ./.venv/Scripts/python.exe -c "from app.pipeline import build_shortlist; \
+// seed fixtures mode) — regenerate from backend/ with your venv's python
+// (./.venv/Scripts/python.exe on Windows, .venv/bin/python on macOS/Linux):
+//   python -c "from app.pipeline import build_shortlist; \
 //     from app.sources.seed import SeedDatasetSource; import json; \
 //     json.dump(build_shortlist(SeedDatasetSource()).model_dump(by_alias=True), \
 //     open('../frontend/functions/api/shortlist.json','w',encoding='utf-8'), ensure_ascii=False)"
+// The bundled fallback (src/data/kols.ts) imports this same JSON, so regenerating
+// it updates the API response AND the fallback in one step.
 // For live per-request compute, run the FastAPI app and point VITE_API_URL at it.
 import shortlist from "./shortlist.json"
 

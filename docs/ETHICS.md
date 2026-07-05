@@ -42,8 +42,9 @@ invented handles, and why the repo never ships a real creator labeled fraudulent
 
 - The vetting layer **biases toward flagging** (low threshold) and routes **every** decision —
   pass and fail — through human review. It never silently auto-excludes or auto-clears.
-- Structural signals lead; the Thai comment-phrase lexicon is an **advisory tiebreaker**,
-  explicitly *"pattern heuristic, human-review recommended,"* not authoritative Thai judgment.
+- Structural signals lead; the Thai comment-phrase lexicon never fires a flag on its own —
+  it only **annotates an already-fired pod badge** as corroboration, labeled in the product
+  as *"pattern heuristic, human-review recommended,"* not authoritative Thai judgment.
 - Calibrated humility: the structural signals catch **commodity pods and bought engagement**.
   Sophisticated aged-account farms can defeat purely structural signals — which is precisely
   why a flag routes to a human and why licensed audience data is the production answer.
@@ -79,6 +80,10 @@ v1"* — a collaboration hook, not a claim of finished Thai-domain authority.
 
 ## Confidence is computed, not claimed
 
-Every confidence number is derived from data (sample size, completeness, cohort-n), not an
-LLM's self-assessment. LLM-emitted confidence is reserved for genuinely subjective fields and
-clearly marked as such. This keeps the tool from over-stating certainty to a client.
+The rule: **no confidence number ships unless it is computed from data** (sample size,
+completeness, cohort-n) — never an LLM's self-assessment. Today the product shows *no*
+numeric confidence anywhere; the computed-confidence functions are built and tested
+(`backend/app/trust/confidence.py`) and surfacing them in the contract/UI is roadmap.
+What ships now instead: every match factor carries a measured/inferred provenance tag,
+and every inferred field's rationale carries an inline *"do not quote to client as fact"*
+advisory. This keeps the tool from over-stating certainty to a client.

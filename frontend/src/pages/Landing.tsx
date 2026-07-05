@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { TintPill, StatCard, StatChip, Kicker } from "../components/ui/brand"
 import ccLogo from "../assets/convertcake-logo.png"
+import { kols, summary } from "../data/kols"
+import { compact } from "../lib/format"
+import type { Kol } from "../lib/types"
 import {
   ArrowRight,
   ShieldAlert,
@@ -49,6 +52,15 @@ function Reveal({ children, delay = 0, className }: { children: ReactNode; delay
 }
 
 /* ── Hero product preview: the fraud-catch moment ─────────────────────────── */
+
+/* Every number on the landing derives from the same committed pipeline payload
+   the app renders (src/data/kols.ts) — the marketing can never disagree with
+   the product. The three picks mirror the shortlist story: cleanest fit,
+   mid-tier anchor, and the fraud catch. */
+const pick = (id: string): Kol => kols.find((k) => k.id === id) ?? kols[0]
+const heroTop = pick("k1")
+const heroMid = pick("k5")
+const heroFraud = pick("k4")
 
 function PreviewRow({
   initials,
@@ -122,26 +134,36 @@ function ProductPreview() {
             <span className="text-[13px] font-semibold text-ink">Glow Lab · shortlist</span>
           </div>
           <span className="tnum rounded-full bg-panel px-2 py-0.5 text-[11px] font-medium text-ink-500">
-            42 screened
+            {summary.screened} screened
           </span>
         </div>
         <div className="space-y-1">
-          <PreviewRow initials="PL" hue={244} handle="@ploy.skinnote" meta="micro · 38.2K · ER 7.2%" fit={92} state="authentic" />
-          <PreviewRow initials="NN" hue={200} handle="@nune.skinscience" meta="mid · 158K · ER 5.2%" fit={87} state="authentic" />
-          <PreviewRow initials="MM" hue={330} handle="@mimin.glowyskin" meta="macro · 486K · ER 9.1%" fit={44} state="fraud" />
+          {[heroTop, heroMid, heroFraud].map((k) => (
+            <PreviewRow
+              key={k.id}
+              initials={k.avatar.initials}
+              hue={k.avatar.hue}
+              handle={k.handle}
+              meta={`${k.tier} · ${compact(k.followers)} · ER ${k.engagementRate}%`}
+              fit={k.fitScore}
+              state={k.risk.level === "clear" ? "authentic" : "fraud"}
+            />
+          ))}
         </div>
       </div>
 
       {/* floating stat chips — their hero motif (never covering card text) */}
-      <StatChip value="3" label="flagged for review" className="absolute left-1 top-[55%] hidden -translate-x-full shadow-md sm:inline-flex" />
+      <StatChip value={String(summary.flagged)} label="flagged for review" className="absolute left-1 top-[55%] hidden -translate-x-full shadow-md sm:inline-flex" />
       <StatChip value="≈15" label="min to shortlist" className="absolute -right-5 -top-5 hidden shadow-md sm:inline-flex" />
 
       {/* floating fraud callout */}
       <div className="absolute -bottom-2 left-1/2 flex w-[300px] -translate-x-1/2 items-start gap-2.5 rounded-xl border border-risk-high-border bg-white px-3.5 py-2.5 shadow-lg">
         <ShieldAlert size={16} className="mt-0.5 shrink-0 text-risk-high" />
         <p className="text-[12px] leading-snug text-ink-700">
-          <span className="font-semibold text-ink">486K followers, 9.1% engagement — and fake.</span> A
-          follower-count tool would have recommended her. Kollab caught the comment pod.
+          <span className="font-semibold text-ink">
+            {compact(heroFraud.followers)} followers, {heroFraud.engagementRate}% engagement — and fake.
+          </span>{" "}
+          A follower-count tool would have recommended her. Kollab caught the comment pod.
         </p>
       </div>
     </div>
@@ -306,7 +328,7 @@ export function Landing() {
       <section className="mx-auto max-w-7xl px-6 pb-4 pt-2">
         <div className="grid gap-5 sm:grid-cols-3">
           <Reveal>
-            <StatCard value="42" label="KOLs screened per brief" />
+            <StatCard value={String(summary.screened)} label="KOLs screened per brief" />
           </Reveal>
           <Reveal delay={0.08}>
             <StatCard value="8" label="structural fraud signals" />
@@ -417,10 +439,10 @@ export function Landing() {
                   <div className="rounded-2xl border border-border bg-white px-5 py-4 shadow-sm lg:w-56">
                     <div className="text-[14px] font-semibold text-ink">Client-ready shortlist</div>
                     <div className="mt-2 flex items-center gap-2">
-                      <span className="tnum rounded-md bg-brand-50 px-2 py-1 text-[13px] font-bold text-brand">92</span>
-                      <span className="tnum rounded-md bg-brand-50 px-2 py-1 text-[13px] font-bold text-brand">87</span>
+                      <span className="tnum rounded-md bg-brand-50 px-2 py-1 text-[13px] font-bold text-brand">{heroTop.fitScore}</span>
+                      <span className="tnum rounded-md bg-brand-50 px-2 py-1 text-[13px] font-bold text-brand">{heroMid.fitScore}</span>
                       <span className="tnum rounded-md bg-risk-high-bg px-2 py-1 text-[13px] font-bold text-risk-high-fg">
-                        44 ⚑
+                        {heroFraud.fitScore} ⚑
                       </span>
                       <span className="text-[12px] text-ink-500">ranked + flagged</span>
                     </div>

@@ -1,32 +1,28 @@
-# React + TypeScript + Vite
+# Kollab — frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19 + TypeScript + Vite + Tailwind v4. The full product story, setup, and
+architecture live in the [root README](../README.md); this note covers only what
+is specific to this directory.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev        # http://localhost:5178 (port pinned in vite.config.ts)
+npm run build      # typecheck + production bundle -> dist/
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Requires Node 20.19+ (or 22.12+).
+
+## How data reaches the UI
+
+- `functions/api/shortlist.ts` — Cloudflare Pages Function serving the Python
+  pipeline's committed output at `/api/shortlist` (the regeneration command is
+  documented at the top of that file).
+- `src/data/kols.ts` — the bundled fallback imports that same committed payload,
+  so the fallback, the hosted API, and every on-screen number cannot drift.
+- `src/lib/api.ts` — fetch + validation + fixtures fallback. Set `VITE_API_URL`
+  to point the UI at a live FastAPI backend instead of the Pages Function.
+
+## Handy scripts
+
+- `scripts/shot.mjs` — Playwright screenshot/click-through helper used for
+  visual verification (`node scripts/shot.mjs <url> <out.png> ...`).

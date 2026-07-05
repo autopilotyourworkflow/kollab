@@ -40,3 +40,13 @@ def test_clean_cohort_is_all_clear():
 def test_authenticity_score_low_for_pod():
     creators = _pod_creators()
     assert vet_cohort(creators, creators)["cre0"].authenticity_score < 30
+
+
+def test_pod_badge_carries_thai_lexicon_corroboration():
+    # "ปังมาก" matches the starter Thai pod-phrase lexicon; the pod badge must
+    # surface it as corroboration, explicitly labeled a pattern heuristic.
+    creators = _pod_creators()
+    pod = next(s for s in vet_cohort(creators, creators)["cre0"].risk.signals
+               if s.label == "Comment pod")
+    assert "Thai pod phrases" in pod.detail
+    assert "pattern heuristic, human-review recommended" in pod.detail

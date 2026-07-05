@@ -65,13 +65,20 @@ def _gen_videos(rng, author_id, median_views, er, n, newest, cadence_pw, boost_m
     if boost_mult and boost_recent:
         for j in range(1, boost_recent + 1):
             plays[-j] = int(median_views * boost_mult)  # self-outlier spike (most recent)
+    # Engagement jitter is median-normalized (same rule as plays above) so the
+    # REALIZED per-video engagement-ratio median lands on the descriptor's ER —
+    # every ER a rationale or why-copy quotes is the number the pipeline computes.
+    emults = [rng.uniform(0.9, 1.1) for _ in range(n)]
+    emed = median(emults) or 1.0
     vids = []
     for i, (t, pv) in enumerate(zip(times, plays)):
-        eng = pv * er / 100.0 * rng.uniform(0.9, 1.1)
+        eng = round(pv * er / 100.0 * emults[i] / emed)  # = digg+comment+share exactly
+        comment = round(eng * 0.07)
+        share = round(eng * 0.03)
         vids.append(RawVideo(
             video_id=f"{author_id}_v{i}", play_count=pv,
-            digg_count=int(eng * 0.9), comment_count=int(eng * 0.07),
-            share_count=int(eng * 0.03), collect_count=int(eng * 0.02),
+            digg_count=max(eng - comment - share, 0), comment_count=comment,
+            share_count=share, collect_count=round(eng * 0.02),
             create_time_iso=_iso(t), text=f"clip {i}", hashtags=["skincare", "beauty"],
         ))
     return vids

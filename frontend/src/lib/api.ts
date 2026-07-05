@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import type { ClientBrief, Kol } from "./types"
-import { kols as fixtureKols, client as fixtureClient, summary as fixtureSummary } from "../data/kols"
+import { kols as fixtureKols, client as fixtureClient, summary as fixtureSummary, cost as fixtureCost } from "../data/kols"
 
 /** One shortlist payload, whichever source produced it. Shape == the backend's
     ShortlistResponse (camelCase); the bundled fixtures satisfy it too. */
@@ -26,8 +26,9 @@ const fixtureData: ShortlistData = {
   screened: fixtureSummary.screened,
   recommended: fixtureSummary.recommended,
   flagged: fixtureSummary.flagged,
-  // mirrors backend estimate_cost() on the seed cohort (projected live-pull cost)
-  cost: { usd: 1.02, seconds: 9.4, cacheHitRate: 0 },
+  // backend estimate_cost() on the seed cohort (projected live-pull cost) —
+  // read from the same committed payload, so it can't drift from the API.
+  cost: fixtureCost,
   source: "fixtures",
 }
 

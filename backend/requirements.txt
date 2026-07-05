@@ -1,7 +1,9 @@
-# Runtime deps (credential-free fixtures mode needs only these).
-fastapi>=0.115
-uvicorn[standard]>=0.30
-pydantic>=2.7
+# Runtime deps, pinned to the exact resolution the suite was tested against
+# (compatibility floors live in pyproject.toml; pins keep a reviewer's install
+# reproducing the tested environment).
+fastapi==0.139.0
+uvicorn[standard]==0.49.0
+pydantic==2.13.4
 
 # Dev/test:  pip install pytest httpx
 # Live Apify run (optional):  pip install apify-client

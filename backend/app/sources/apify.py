@@ -8,12 +8,15 @@ Verified actor payloads (pre-flight spike, 2026-07-02):
   - clockworks/tiktok-scraper           $1.70 / 1k   → profile + video fields
   - clockworks/tiktok-comments-scraper  $0.50 / 1k   → per-comment fields
 
-The JSON→RawKOL mappers below are pure and unit-tested; the network call is guarded
-behind APIFY_TOKEN and stays disabled (raises) in the credential-free demo.
+The JSON→RawKOL mappers below are pure and unit-tested against the documented actor
+payloads. The actor-run loop itself is NOT wired in this build (roadmap — it lands
+with the recorded live run): fetch_candidates raises a clear error rather than
+pretending, and the API turns that into a 503.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from zlib import crc32
 
 from app.raw import RawComment, RawKOL, RawProfile, RawVideo
@@ -22,6 +25,20 @@ from app.sources.base import KOLSource, Presentation
 
 TIKTOK_SCRAPER_ACTOR = "clockworks/tiktok-scraper"
 TIKTOK_COMMENTS_ACTOR = "clockworks/tiktok-comments-scraper"
+
+
+def _to_iso(ts) -> str:
+    """Normalize an actor timestamp to ISO 8601, or '' when unusable.
+
+    The actors emit `createTimeISO` (ISO string) and/or `createTime` (unix epoch
+    seconds). Every downstream detector parses this field, so the mapper either
+    produces a valid ISO string or '' — and assemble_kol DROPS ''-stamped items
+    rather than letting them crash the time-based detectors."""
+    if ts is None or ts == "":
+        return ""
+    if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.isdigit()):
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    return str(ts)
 
 
 # ── Pure mappers (actor JSON → our boundary model) ──────────────────────────
@@ -51,7 +68,7 @@ def parse_video_item(item: dict) -> RawVideo:
         comment_count=int(stats.get("commentCount") or 0),
         share_count=int(stats.get("shareCount") or 0),
         collect_count=int(stats.get("collectCount") or 0),
-        create_time_iso=str(item.get("createTimeISO") or item.get("createTime") or ""),
+        create_time_iso=_to_iso(item.get("createTimeISO") or item.get("createTime")),
         text=str(item.get("text") or ""),
         hashtags=[h.get("name", h) if isinstance(h, dict) else h for h in item.get("hashtags", [])],
     )
@@ -66,18 +83,21 @@ def parse_comment_item(item: dict) -> RawComment:
         text=str(item.get("text") or ""),
         digg_count=int(item.get("diggCount") or 0),
         reply_comment_total=int(item.get("replyCommentTotal") or 0),
-        create_time_iso=str(item.get("createTimeISO") or ""),
+        create_time_iso=_to_iso(item.get("createTimeISO") or item.get("createTime")),
         video_web_url=str(item.get("videoWebUrl") or ""),
     )
 
 
 def assemble_kol(profile_item: dict, video_items: list[dict], comment_items: list[dict],
                  vertical: str = "beauty", tier: str = "micro") -> RawKOL:
-    """Combine one profile + its videos + sampled comments into a RawKOL."""
+    """Combine one profile + its videos + sampled comments into a RawKOL.
+
+    Items without a usable timestamp are dropped here: every downstream detector
+    is time-based, so an unstamped item is unusable evidence, not a crash."""
     return RawKOL(
         profile=parse_profile_item(profile_item),
-        videos=[parse_video_item(v) for v in video_items],
-        comments=[parse_comment_item(c) for c in comment_items],
+        videos=[v for v in (parse_video_item(i) for i in video_items) if v.create_time_iso],
+        comments=[c for c in (parse_comment_item(i) for i in comment_items) if c.create_time_iso],
         vertical=vertical,
         tier=tier,
     )
@@ -95,19 +115,14 @@ class ApifyAdapter(KOLSource):
                 "ApifyAdapter needs APIFY_TOKEN. The credential-free demo uses "
                 "SeedDatasetSource; enable Apify only for the recorded live run."
             )
-        # Live path (prototyping-only). Kept thin on purpose: run the two actors,
-        # read their dataset items, and hand the raw JSON to the pure mappers above.
-        try:
-            from apify_client import ApifyClient  # optional dep, only for live runs
-        except ImportError as e:  # pragma: no cover - exercised only with creds
-            raise RuntimeError(
-                "apify-client not installed. `pip install apify-client` for the live run."
-            ) from e
-
-        client = ApifyClient(self.token)  # pragma: no cover - network path
+        # NOT WIRED IN THIS BUILD (see README roadmap). The actor→RawKOL mappers
+        # above are the tested seam; the thin actor-run loop (run the two actors,
+        # read dataset items, hand the JSON to the mappers) ships with the recorded
+        # live run. The API surfaces this as a clean 503, never a silent fake result.
         raise NotImplementedError(
-            "Live Apify sourcing is wired via the mappers above and enabled during the "
-            "recorded live run; the deployed demo runs entirely on SeedDatasetSource."
+            "Live Apify sourcing is not wired in this build — the mappers are the "
+            "tested seam; the actor-run loop lands with the recorded live run. "
+            "The demo runs entirely on SeedDatasetSource."
         )
 
     def presentation(self, kol: RawKOL) -> Presentation:
@@ -120,8 +135,8 @@ class ApifyAdapter(KOLSource):
             category_th="",
             avatar_initials=initials,
             avatar_hue=crc32(handle.encode()) % 360,
-            topic_score=0,      # requires embeddings/LLM (enabled with keys)
-            audience_score=0,   # advisory, inferred with keys
+            topic_score=0,      # requires the embeddings/LLM rerank path (roadmap)
+            audience_score=0,   # advisory; inference is roadmap
             brand_safety_status="clear",
             conflict_status="clear",
             hitl="pending",

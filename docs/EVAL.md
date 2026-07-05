@@ -49,10 +49,10 @@ Run on the 11 glow-lab fixtures, 7 labeled include / 4 exclude:
 Read those 1.0s with the suspicion they deserve. The seed fixtures were engineered so
 the detectors reproduce the curated demo story, and the current labels were drafted
 from **that same story** — so agreement is partly circular. What the run genuinely
-demonstrates is narrower: the wiring works, the fraud-flagged KOLs (k4 comment pod, k6
-bought followers) land at the bottom of the ranking despite having the biggest follower
-counts in the set, and the harness will catch a regression if a scoring change reorders
-the boundary. It does not demonstrate real-world precision. Also: with n=11, one label
+demonstrates is narrower: the wiring works, the fraud-flagged KOLs land at the very
+bottom of the ranking despite follower counts a reach-only tool would reward (k4 is the
+second-largest account in the set at 486K), and the harness will catch a regression if
+a scoring change reorders the boundary. It does not demonstrate real-world precision. Also: with n=11, one label
 flip moves precision@3 by 33 points — every number here is a step function.
 
 ## The wrong case: k8 (@gigi.beautypro)

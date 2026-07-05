@@ -24,6 +24,7 @@ from app.fraud.signals import (
     commenter_reuse_across_creators,
     duplicate_comment_text,
     er_vs_cohort_outlier,
+    thai_lexicon_hits,
     thin_commenter_profiles,
     view_to_follower_collapse,
 )
@@ -56,7 +57,7 @@ def _overall_level(signals: list[FraudSignal]) -> str:
     return max((s.level for s in signals), key=lambda lv: _LEVEL_RANK[lv])
 
 
-def _pod_badge(fired: list[SignalResult]) -> FraudSignal | None:
+def _pod_badge(fired: list[SignalResult], kol: RawKOL) -> FraudSignal | None:
     pod = [r for r in fired if r.family == "pod"]
     if not pod:
         return None
@@ -66,21 +67,28 @@ def _pod_badge(fired: list[SignalResult]) -> FraudSignal | None:
         if lead:
             break
     level = max((r.level for r in pod), key=lambda lv: _LEVEL_RANK[lv])
+    detail = lead.detail
+    # Thai pod-phrase lexicon: advisory corroboration ONLY — it never fires a badge
+    # on its own (farms rotate wording monthly), it only annotates a structural one.
+    hits = thai_lexicon_hits(kol.comments)
+    if hits:
+        detail += (f"; {hits} comments match known Thai pod phrases "
+                   f"(pattern heuristic, human-review recommended)")
     return FraudSignal(
         label="Comment pod",
-        detail=lead.detail,
+        detail=detail,
         level=level,
         measured_against=lead.measured_against,
     )
 
 
-def _badges(fired: list[SignalResult]) -> list[FraudSignal]:
+def _badges(fired: list[SignalResult], kol: RawKOL) -> list[FraudSignal]:
     structural_fired = any(r.name in ("commenter_reuse", "comment_burst", "duplicate_text",
                                       "view_to_follower", "thin_commenters", "boosted_post")
                            for r in fired)
     badges: dict[str, FraudSignal] = {}
 
-    pod = _pod_badge(fired)
+    pod = _pod_badge(fired, kol)
     if pod:
         badges["pod"] = pod
 
@@ -116,7 +124,7 @@ def vet_kol(
         cadence_dormancy(kol, now),
     ]
     fired = [r for r in results if r.fired]
-    badges = _badges(fired)
+    badges = _badges(fired, kol)
     penalty = min(1.0, sum(r.penalty for r in fired))
     authenticity = max(0, min(100, round(100 * (1 - penalty))))
     return VetResult(

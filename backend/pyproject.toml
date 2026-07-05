@@ -17,6 +17,11 @@ live = ["apify-client>=1.7"]   # only needed for the recorded live Apify run
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = [
+    # fastapi 0.139's TestClient shim warns about the upstream starlette
+    # httpx -> httpx2 transition; not actionable from this project.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
 
 [tool.ruff]
 line-length = 110

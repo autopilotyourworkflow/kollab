@@ -11,7 +11,9 @@ ranking it produces to the include/exclude labels in labels.glow-lab.json:
     the thinnest margin at the include/exclude boundary, because with n=11 provisional
     labels a clean separation is a smoke test, not a victory.
 
-Usage (from backend/):  ./.venv/Scripts/python.exe eval/run_eval.py
+Usage (from backend/):
+  ./.venv/Scripts/python.exe eval/run_eval.py    # Windows
+  .venv/bin/python eval/run_eval.py              # macOS / Linux
 
 Writes eval/results.json and prints a human-readable report. Directional harness, not a
 benchmark — see eval/rubric.md for the honest framing.

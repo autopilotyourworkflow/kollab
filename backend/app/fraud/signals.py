@@ -1,9 +1,10 @@
 """Structural fraud detectors — pure functions, each independently testable.
 
 Ordered by durability (PLAN.md): the structural signals below are the durable
-part; a Thai phrase lexicon (see thai_lexicon) is only a tiebreaker/explainability
-aid because pod farms rotate wording monthly. Every detector returns a SignalResult
-that names the triggered pattern and the baseline it was measured against.
+part; a Thai phrase lexicon (see thai_lexicon_hits, appended to the pod badge as
+corroboration) is only a tiebreaker/explainability aid because pod farms rotate
+wording monthly. Every detector returns a SignalResult that names the triggered
+pattern and the baseline it was measured against.
 
 Thresholds are named constants with a cited rationale rather than hand-picked in
 line — so a reviewer can audit and a Thai account manager can retune them.
@@ -50,6 +51,8 @@ THIN_MAX_POSTS = 5
 VTF_ABS_FLOOR = 0.05         # <5% of followers ever view = pathological
 VTF_COLLAPSE_FRAC = 0.25     # or <25% of the peer-median ratio = a real collapse
                              # (merely below p10 is NOT fraud — 10% of clean peers are)
+VTF_MIN_VIDEOS = 5           # below this the ratio is absence-of-data, not evidence:
+                             # withhold rather than flag (same rule as the n>=15 cohort gate)
 
 # Self-baseline boost: a post far above the creator's own trailing median.
 BOOST_MED_MULT = 2.0         # possible boosted post (verify organic baseline)
@@ -115,7 +118,7 @@ def commenter_reuse_across_creators(
             level="high",
             label="Comment pod",
             detail=(
-                f"{len(pod_accounts)} accounts post near-identical comments across "
+                f"{len(pod_accounts)} shared accounts comment across "
                 f"{max_creators} unrelated creators within {window_days} days"
             ),
             measured_against=f"shared-commenter graph over {len(comments)} sampled comments",
@@ -143,7 +146,7 @@ def comment_burst_timing(kol: RawKOL) -> SignalResult:
             fired=True,
             level="high",
             label="Comment burst",
-            detail=f"{worst} comments within {BURST_WINDOW_S}s on one video, then silence",
+            detail=f"{worst} comments within {BURST_WINDOW_S}s on one video",
             measured_against="comment timestamps on the spiking video",
             penalty=0.6,
             family="pod",
@@ -246,6 +249,18 @@ def er_vs_cohort_outlier(kol: RawKOL, cohort: CohortStats) -> SignalResult:
 
 # ── View-to-follower collapse (bought followers) ────────────────────────────
 def view_to_follower_collapse(kol: RawKOL, cohort: CohortStats) -> SignalResult:
+    if len(kol.videos) < VTF_MIN_VIDEOS:
+        # No/too-few videos is absence of evidence (private account, failed scrape,
+        # brand-new creator) — never assert "Bought followers" from it.
+        return SignalResult(
+            name="view_to_follower",
+            fired=False,
+            level="clear",
+            label="",
+            detail="insufficient video sample — signal withheld",
+            measured_against=f"{len(kol.videos)} sampled videos (min {VTF_MIN_VIDEOS})",
+            withheld=True,
+        )
     vtf = view_to_follower(kol)
     # A real collapse = far below the peer NORM (median), not merely below p10.
     below_cohort = bool(
@@ -291,8 +306,8 @@ def boosted_post(kol: RawKOL) -> SignalResult:
         return SignalResult(
             name="boosted_post", fired=True, level="medium", label="Possible boosted post",
             detail=f"{_count_over(plays[-BOOST_RECENT_N:], baseline, BOOST_MED_MULT)} recent posts run "
-                   f"{mult:.1f}x her trailing median — verify organic baseline before pricing reach",
-            measured_against="her prior posts (self-baseline)",
+                   f"{mult:.1f}x the account's own trailing median — verify organic baseline before pricing reach",
+            measured_against="this creator's prior posts (self-baseline)",
             penalty=0.15, metrics={"mult": round(mult, 1)},
         )
     return _clear("boosted_post")

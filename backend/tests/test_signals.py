@@ -124,6 +124,22 @@ def test_view_to_follower_silent_when_healthy():
     assert view_to_follower_collapse(healthy, cohort).fired is False
 
 
+def test_view_to_follower_withheld_without_videos():
+    # Zero videos (private account / failed scrape) is absence of evidence —
+    # never assert "Bought followers" from it.
+    cohort = build_cohorts(make_cohort(20))["beauty:micro"]
+    empty = make_kol(author_id="e", followers=50000, n_videos=0)
+    res = view_to_follower_collapse(empty, cohort)
+    assert res.fired is False and res.withheld is True
+
+
+def test_view_to_follower_withheld_below_min_video_sample():
+    cohort = build_cohorts(make_cohort(20))["beauty:micro"]
+    sparse = make_kol(author_id="s", followers=500000, median_views=100, n_videos=3)
+    res = view_to_follower_collapse(sparse, cohort)
+    assert res.fired is False and res.withheld is True
+
+
 # ── boosted post (self-baseline) ────────────────────────────────────────────
 def _kol_with_plays(plays):
     vids = [RawVideo(video_id=f"v{i}", play_count=p, create_time_iso=iso(BASE + timedelta(days=i)))
