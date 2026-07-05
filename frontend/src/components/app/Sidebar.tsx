@@ -115,8 +115,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       <aside
         inert={!open && !isDesktop}
         className={cn(
-          "fixed inset-y-0 left-0 z-[50] flex w-[248px] shrink-0 flex-col border-r border-border bg-white transition-transform duration-200 ease-out",
-          "lg:static lg:z-auto lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-[50] flex w-[248px] shrink-0 flex-col overflow-hidden border-r border-border bg-white transition-transform duration-200 ease-out",
+          // Desktop: pin to the viewport (sticky, one screen tall, self-start so it
+          // never stretches with the page) — the rail stays put no matter how many
+          // shortlists the content grows to, and never scrolls with the page.
+          "lg:sticky lg:top-0 lg:z-auto lg:h-svh lg:translate-x-0 lg:self-start",
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
       >

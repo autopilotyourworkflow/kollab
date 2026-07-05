@@ -3,7 +3,7 @@ import { useOutletContext, useParams, Navigate, Link } from "react-router-dom"
 import { AnimatePresence, motion } from "motion/react"
 import {
   ShieldAlert,
-  Globe,
+  Gauge,
   ArrowUpDown,
   SearchX,
   Share2,
@@ -16,6 +16,7 @@ import type { HitlStatus, Kol } from "../lib/types"
 import { cn } from "../lib/cn"
 import { expandShortlist } from "../lib/api"
 import { apiBase } from "../lib/credit"
+import { plans, loadRunPlan, saveRunPlan, fromPreset } from "../lib/runPlan"
 import {
   getEntry,
   setDecision as persistDecision,
@@ -78,6 +79,12 @@ export function Shortlist() {
   const [showExport, setShowExport] = useState(false)
   const [adding, setAdding] = useState(false)
   const [justAdded, setJustAdded] = useState<number | null>(null)
+  // Run depth for the next "Add more" (expand) run — the per-run setting.
+  const presets = plans.presets.filter((p) => p.key !== "custom")
+  const [depthKey, setDepthKey] = useState<string>(() => {
+    const k = loadRunPlan().key
+    return presets.some((p) => p.key === k) ? k : plans.defaultPreset
+  })
   const isMobile = useIsMobile()
 
   const kols = useMemo(() => entry?.kols ?? [], [entry])
@@ -91,6 +98,10 @@ export function Shortlist() {
   // "Add more results": accumulate NEW creators into this same shortlist. A live
   // backend does a real expand-run (never re-buys held data); with no backend the
   // demo pool stands in so accumulation is visible either way.
+  // Demo depth → how many pool creators one expand reveals (live runs use the
+  // preset's real creator/comment volumes on the backend).
+  const DEMO_BATCH: Record<string, number> = { scan: 2, standard: 4, deep: 8 }
+
   const addMore = async () => {
     if (!entry || adding) return
     setAdding(true)
@@ -98,11 +109,11 @@ export function Shortlist() {
     try {
       let added = 0
       if (apiBase()) {
-        const live = await expandShortlist(entry.brief)
-        added = live && live.length ? appendKols(entry.id, live) : appendDemoBatch(entry.id)
+        const live = await expandShortlist(entry.brief, depthKey)
+        added = live && live.length ? appendKols(entry.id, live) : appendDemoBatch(entry.id, DEMO_BATCH[depthKey] ?? 4)
         if (added && live?.length) markSourceLive(entry.id)
       } else {
-        added = appendDemoBatch(entry.id)
+        added = appendDemoBatch(entry.id, DEMO_BATCH[depthKey] ?? 4)
       }
       setJustAdded(added)
       window.setTimeout(() => setJustAdded(null), 4000)
@@ -170,14 +181,28 @@ export function Shortlist() {
             </h1>
             <p className="mt-1 max-w-2xl text-[13px] font-medium text-ink-500">{audience}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <span
-              title="Fictional demo brand — no live website"
-              className="hidden items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-[12px] font-medium text-ink-700 shadow-xs sm:inline-flex"
-            >
-              <Globe size={14} className="text-ink-400" />
-              {entry.brief.website}
-            </span>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Per-run depth: what the next "Add more" run will source & spend */}
+            <label htmlFor="run-depth" className="flex items-center gap-1.5 rounded-md border border-border bg-white pl-2.5 pr-1 shadow-xs">
+              <Gauge size={13} className="text-ink-400" />
+              <select
+                id="run-depth"
+                value={depthKey}
+                onChange={(e) => {
+                  setDepthKey(e.target.value)
+                  const p = presets.find((x) => x.key === e.target.value)
+                  if (p) saveRunPlan(fromPreset(p))
+                }}
+                title="Depth & budget for the next Add-more run"
+                className="h-8 cursor-pointer bg-transparent py-0 pr-1 text-[12px] font-medium text-ink-700 focus:outline-none"
+              >
+                {presets.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label} · ≈${p.estUsd.toFixed(2)}
+                  </option>
+                ))}
+              </select>
+            </label>
             <Button
               size="sm"
               variant="secondary"

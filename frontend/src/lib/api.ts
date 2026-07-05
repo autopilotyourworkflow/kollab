@@ -92,14 +92,14 @@ export function useShortlist(): ShortlistData {
     backend that never re-buys held data (POST /api/shortlist?expand=1). Returns the
     fresh Kol[] or null when there's no backend / it fails — the caller then falls
     back to the demo expansion pool so accumulation always works. */
-export async function expandShortlist(brief: ClientBrief): Promise<Kol[] | null> {
+export async function expandShortlist(brief: ClientBrief, preset = "standard"): Promise<Kol[] | null> {
   const base = (import.meta.env.VITE_API_URL as string | undefined) ?? ""
   if (!base) return null
   try {
     const { authHeaders } = await import("./credentials")
     const ctrl = new AbortController()
     const t = window.setTimeout(() => ctrl.abort(), 30_000)
-    const res = await fetch(`${base}/api/shortlist?expand=1`, {
+    const res = await fetch(`${base}/api/shortlist?expand=1&preset=${encodeURIComponent(preset)}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify(brief),

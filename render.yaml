@@ -19,6 +19,9 @@ services:
         value: seed            # flip to apify (with APIFY_TOKEN set) for live sourcing
       - key: KOLLAB_RUN_BUDGET_USD
         value: "5"
+      - key: KOLLAB_SHARED_KEY
+        value: "1"             # share your keys as the fallback; set 0 to require
+                              #  visitors' own keys (the "I'm running low" kill switch)
       - key: APIFY_TOKEN
         sync: false            # set in the Render dashboard, never in the repo
       - key: ANTHROPIC_API_KEY
