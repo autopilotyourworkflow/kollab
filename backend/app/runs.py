@@ -15,6 +15,10 @@ from collections.abc import Iterable
 from app.db import get_sessionmaker
 from app.models import Run
 
+# Run ids the user has asked to stop. In-process (single Render instance); the
+# running job thread polls it via cancel_check, and request_cancel adds to it.
+_cancel_requested: set[str] = set()
+
 
 def _session():
     factory = get_sessionmaker()
@@ -53,19 +57,61 @@ def run_job(run_id: str, brief_dict: dict | None, preset: str, expand: bool,
     from app.config import reset_request_credentials, set_request_credentials
     from app.schemas import ClientBrief
     from app.service import BadRequest, LiveRunError, run_shortlist
+    from app.sources.apify import RunCancelled
 
     token = set_request_credentials(apify_token, anthropic_key)
     try:
         _update(run_id, status="running")
         brief = ClientBrief.model_validate(brief_dict) if brief_dict else None
-        response = run_shortlist(brief, preset=preset, expand=expand, exclude=exclude)
-        _update(run_id, status="done", result=response.model_dump(by_alias=True))
+        response = run_shortlist(brief, preset=preset, expand=expand, exclude=exclude,
+                                 cancel_check=lambda: run_id in _cancel_requested)
+        if run_id in _cancel_requested:  # stop that raced past the last checkpoint
+            _update(run_id, status="cancelled")
+        else:
+            _update(run_id, status="done", result=response.model_dump(by_alias=True))
+    except RunCancelled:
+        _update(run_id, status="cancelled")
     except (LiveRunError, BadRequest) as e:
         _update(run_id, status="error", error=str(e))
     except Exception as e:  # never leave a run wedged in "running"
         _update(run_id, status="error", error=f"{type(e).__name__}: {e}")
     finally:
         reset_request_credentials(token)
+        _cancel_requested.discard(run_id)
+
+
+def request_cancel(run_id: str, apify_token: str | None = None) -> dict | None:
+    """Stop a run: flag it (the loop's cancel_check trips at the next phase boundary),
+    mark it cancelled, and best-effort abort its in-flight Apify actor so the slow
+    search stops billing at once. Returns the updated run, or None if unknown."""
+    run = get_run(run_id)
+    if run is None:
+        return None
+    if run["status"] in ("done", "error", "cancelled"):
+        return run  # already terminal — nothing to stop
+    _cancel_requested.add(run_id)
+    _update(run_id, status="cancelled")
+    if apify_token:
+        _abort_running_apify(apify_token)
+    return get_run(run_id)
+
+
+def _abort_running_apify(token: str) -> None:
+    """Abort the account's currently-running actor runs so a stopped job stops
+    spending immediately. Crude (single free-tier instance runs one job at a time),
+    best-effort, and never raises."""
+    try:
+        import httpx
+
+        listing = httpx.get("https://api.apify.com/v2/actor-runs",
+                            params={"token": token, "status": "RUNNING"}, timeout=15)
+        for run in listing.json().get("data", {}).get("items", []):
+            rid = run.get("id")
+            if rid:
+                httpx.post(f"https://api.apify.com/v2/actor-runs/{rid}/abort",
+                           params={"token": token}, timeout=15)
+    except Exception:
+        pass
 
 
 def start_run(brief_dict: dict | None, preset: str, expand: bool, exclude: Iterable[str],

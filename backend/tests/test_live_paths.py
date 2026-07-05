@@ -184,6 +184,21 @@ def test_apify_loop_refuses_search_that_alone_busts_budget():
     assert fake.calls == []  # refused BEFORE spending anything
 
 
+def test_apify_loop_honors_cancel_before_comment_spend():
+    from app.sources.apify import RunCancelled
+
+    fake = FakeApifyClient({
+        TIKTOK_SCRAPER_ACTOR: _search_response,
+        TIKTOK_COMMENTS_ACTOR: _comments_response,
+    })
+    adapter = ApifyAdapter(client=fake, budget_usd=5.0, results_per_query=50,
+                           cancel_check=lambda: True)
+    with pytest.raises(RunCancelled):
+        adapter.fetch_candidates(BRIEF)
+    # stopped right after the search, before any (billed) comment call
+    assert not [c for c in fake.calls if c[0] == TIKTOK_COMMENTS_ACTOR]
+
+
 def test_search_queries_and_inference_helpers():
     assert search_queries_from_brief(BRIEF) == ["skincare", "ingredient education",
                                                 "sensitive-skin friendly"]

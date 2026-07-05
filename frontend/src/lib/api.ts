@@ -88,41 +88,63 @@ export function useShortlist(): ShortlistData {
   return data
 }
 
-/** Live expand-run: pull MORE creators for a brief the shortlist already has, on the
-    backend that never re-buys held data. A real scrape takes minutes, so the backend
-    runs it asynchronously — we START it (POST /api/runs) and POLL (GET /api/runs/{id})
-    until it finishes. Returns the fresh Kol[], or null when there's no backend / it
-    fails / times out — the caller then falls back to the demo pool so accumulation
-    always works. */
-export async function expandShortlist(brief: ClientBrief, preset = "standard"): Promise<Kol[] | null> {
-  const base = (import.meta.env.VITE_API_URL as string | undefined) ?? ""
+/** Live expand-run, async: a real scrape takes minutes, so the backend runs it in the
+    background (state persisted in Neon) and we drive it from the Run dock — START it
+    here, then POLL and CANCEL from the dock. The run keeps going even if the browser
+    refreshes or closes; the dock re-attaches by id. */
+function apiBase(): string {
+  return (import.meta.env.VITE_API_URL as string | undefined) ?? ""
+}
+
+/** Kick off an expand run; returns the run id (or null with no backend / on failure). */
+export async function startRun(brief: ClientBrief, preset = "standard"): Promise<string | null> {
+  const base = apiBase()
   if (!base) return null
   try {
     const { authHeaders } = await import("./credentials")
-    // 1) start the async run — returns immediately with an id
-    const startRes = await fetch(`${base}/api/runs?preset=${encodeURIComponent(preset)}&expand=1`, {
+    const res = await fetch(`${base}/api/runs?preset=${encodeURIComponent(preset)}&expand=1`, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify(brief),
     })
-    if (!startRes.ok) return null
-    const started = (await startRes.json()) as { id?: string }
-    if (!started.id) return null
-
-    // 2) poll until the background job finishes (search + vetting is 1–3 min); the
-    //    polling itself keeps the free Render instance awake through the run.
-    const deadline = Date.now() + 300_000
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 3500))
-      const pollRes = await fetch(`${base}/api/runs/${started.id}`, { headers: authHeaders() })
-      if (!pollRes.ok) continue
-      const job = (await pollRes.json()) as { status?: string; result?: { kols?: Kol[] } }
-      if (job.status === "done") return job.result?.kols ?? []
-      if (job.status === "error") return null
-    }
-    return null
+    if (!res.ok) return null
+    const data = (await res.json()) as { id?: string }
+    return data.id ?? null
   } catch {
     return null
+  }
+}
+
+export interface RunPoll {
+  status: "queued" | "running" | "done" | "error" | "cancelled"
+  kols?: Kol[]
+  error?: string | null
+}
+
+/** Poll one run. Returns null on a transient/network miss (the dock keeps trying). */
+export async function pollRun(id: string): Promise<RunPoll | null> {
+  const base = apiBase()
+  if (!base) return null
+  try {
+    const { authHeaders } = await import("./credentials")
+    const res = await fetch(`${base}/api/runs/${id}`, { headers: authHeaders() })
+    if (!res.ok) return null
+    const job = (await res.json()) as { status: RunPoll["status"]; result?: { kols?: Kol[] }; error?: string | null }
+    return { status: job.status, kols: job.result?.kols, error: job.error }
+  } catch {
+    return null
+  }
+}
+
+/** Stop a run (and abort its in-flight Apify actor so it stops spending). */
+export async function cancelRun(id: string): Promise<void> {
+  const base = apiBase()
+  if (!base) return
+  try {
+    const { authHeaders } = await import("./credentials")
+    await fetch(`${base}/api/runs/${id}/cancel`, { method: "POST", headers: authHeaders() })
+  } catch {
+    /* best-effort */
   }
 }
 

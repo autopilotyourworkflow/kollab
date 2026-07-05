@@ -3,6 +3,7 @@ import { Outlet, useLocation } from "react-router-dom"
 import { motion } from "motion/react"
 import { Sidebar } from "./Sidebar"
 import { Topbar } from "./Topbar"
+import { RunDock } from "./RunDock"
 
 export type Density = "comfortable" | "spacious"
 
@@ -63,6 +64,8 @@ export function AppShell() {
           </motion.div>
         </main>
       </div>
+      {/* Background sourcing runs — persists across routes; survives refresh/close */}
+      <RunDock />
     </div>
   )
 }

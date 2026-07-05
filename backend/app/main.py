@@ -216,11 +216,30 @@ def start_run_endpoint(
 
 @app.get("/api/runs/{run_id}")
 def get_run_endpoint(run_id: str) -> dict:
-    """Poll a run: {status: queued|running|done|error, result?, error?}. `result` is
-    the camelCase ShortlistResponse the frontend merges once status is done."""
+    """Poll a run: {status: queued|running|done|error|cancelled, result?, error?}.
+    `result` is the camelCase ShortlistResponse the frontend merges once status is
+    done. State lives in the DB, so a poll works after a refresh or a new session."""
     from app.runs import get_run
 
     run = get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return run
+
+
+@app.post("/api/runs/{run_id}/cancel")
+def cancel_run_endpoint(
+    run_id: str,
+    x_apify_token: str | None = Header(default=None),
+    x_anthropic_key: str | None = Header(default=None),
+) -> dict:
+    """Stop a running job and abort its in-flight Apify actor so it stops spending.
+    Idempotent: cancelling a finished run just returns it."""
+    with _request_keys(x_apify_token, x_anthropic_key):
+        token = get_settings().effective_apify_token
+    from app.runs import request_cancel
+
+    run = request_cancel(run_id, apify_token=token)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     return run

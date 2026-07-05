@@ -25,7 +25,8 @@ class BadRequest(ValueError):
 
 
 def make_source(preset: str | None = None, creators: int | None = None,
-                comments: int | None = None, cap_usd: float | None = None):
+                comments: int | None = None, cap_usd: float | None = None,
+                cancel_check=None):
     """Seed fixtures, or a budget-capped ApifyAdapter at the requested depth. The
     per-request effective key (visitor's own, or the shared operator key) is what the
     adapter runs on; a missing key is an honest LiveRunError, never a silent fake."""
@@ -51,16 +52,18 @@ def make_source(preset: str | None = None, creators: int | None = None,
         comments_per_creator=plan.comments_per_creator,
         results_per_query=plan.results_per_query,
         region=settings.region,
+        cancel_check=cancel_check,
     )
 
 
 def run_shortlist(brief: ClientBrief | None, preset: str | None = None,
                   creators: int | None = None, comments: int | None = None,
                   cap_usd: float | None = None, expand: bool = False,
-                  exclude: Iterable[str] = ()) -> ShortlistResponse:
+                  exclude: Iterable[str] = (), cancel_check=None) -> ShortlistResponse:
     """The full path: source -> vet -> match -> rank -> rerank. Expand runs skip the
-    brand's already-held creators before any spend and report the dedup count."""
-    source = make_source(preset, creators, comments, cap_usd)
+    brand's already-held creators before any spend and report the dedup count.
+    `cancel_check` (an optional () -> bool) lets a background run be stopped."""
+    source = make_source(preset, creators, comments, cap_usd, cancel_check=cancel_check)
     is_live = isinstance(source, ApifyAdapter)
     if is_live:
         skip = {h.strip().lstrip("@").lower() for h in exclude}

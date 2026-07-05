@@ -57,6 +57,29 @@ def test_run_records_error_without_leaving_it_running(sqlite_db, monkeypatch):
     assert "Apify" in (r["error"] or "")
 
 
+def test_request_cancel_marks_cancelled(sqlite_db):
+    from app.runs import create_run, get_run, request_cancel
+
+    create_run("rc", brand="X", preset="scan", brief=None)
+    out = request_cancel("rc")  # no token -> no Apify abort, no network
+    assert out["status"] == "cancelled"
+    assert get_run("rc")["status"] == "cancelled"
+
+
+def test_cancel_on_terminal_run_is_noop(sqlite_db):
+    from app.runs import _update, create_run, request_cancel
+
+    create_run("rd", brand="X", preset="scan", brief=None)
+    _update("rd", status="done")
+    assert request_cancel("rd")["status"] == "done"  # already finished — unchanged
+
+
+def test_cancel_unknown_run_returns_none(sqlite_db):
+    from app.runs import request_cancel
+
+    assert request_cancel("does-not-exist") is None
+
+
 def test_start_run_endpoint_requires_a_database(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     reset_db_cache()

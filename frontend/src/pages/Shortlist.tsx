@@ -14,15 +14,14 @@ import {
 } from "lucide-react"
 import type { HitlStatus, Kol } from "../lib/types"
 import { cn } from "../lib/cn"
-import { expandShortlist } from "../lib/api"
+import { startRun } from "../lib/api"
 import { apiBase } from "../lib/credit"
 import { plans, loadRunPlan, saveRunPlan, fromPreset } from "../lib/runPlan"
+import { addRun, WORKSPACE_UPDATED } from "../lib/runsStore"
 import {
   getEntry,
   setDecision as persistDecision,
   appendDemoBatch,
-  appendKols,
-  markSourceLive,
   demoRemaining,
   counts,
   type ShortlistEntry,
@@ -74,11 +73,22 @@ export function Shortlist() {
   const [entry, setEntry] = useState<ShortlistEntry | null>(() => getEntry(id))
   const refresh = () => setEntry(getEntry(id))
 
+  // When the run dock merges a finished run's creators into THIS shortlist, re-read.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { shortlistId?: string } | undefined
+      if (detail?.shortlistId === id) setEntry(getEntry(id))
+    }
+    window.addEventListener(WORKSPACE_UPDATED, on)
+    return () => window.removeEventListener(WORKSPACE_UPDATED, on)
+  }, [id])
+
   const [filter, setFilter] = useState<Filter>("all")
   const [sort, setSort] = useState<SortKey>("fit")
   const [showExport, setShowExport] = useState(false)
   const [adding, setAdding] = useState(false)
   const [justAdded, setJustAdded] = useState<number | null>(null)
+  const [startedHint, setStartedHint] = useState(false)
   // Run depth for the next "Add more" (expand) run — the per-run setting.
   const presets = plans.presets.filter((p) => p.key !== "custom")
   const [depthKey, setDepthKey] = useState<string>(() => {
@@ -104,22 +114,35 @@ export function Shortlist() {
 
   const addMore = async () => {
     if (!entry || adding) return
-    setAdding(true)
-    setJustAdded(null)
-    try {
-      let added = 0
-      if (apiBase()) {
-        const live = await expandShortlist(entry.brief, depthKey)
-        added = live && live.length ? appendKols(entry.id, live) : appendDemoBatch(entry.id, DEMO_BATCH[depthKey] ?? 4)
-        if (added && live?.length) markSourceLive(entry.id)
-      } else {
-        added = appendDemoBatch(entry.id, DEMO_BATCH[depthKey] ?? 4)
-      }
-      setJustAdded(added)
+    // No backend -> demo pool (instant, offline).
+    if (!apiBase()) {
+      const n = appendDemoBatch(entry.id, DEMO_BATCH[depthKey] ?? 4)
+      setJustAdded(n)
       window.setTimeout(() => setJustAdded(null), 4000)
+      refresh()
+      return
+    }
+    // Live -> start a background run and hand it to the dock (fire-and-forget). The
+    // dock polls, merges on done, and the run survives refresh/close. If it can't
+    // even start, fall back to the demo pool.
+    setAdding(true)
+    try {
+      const runId = await startRun(entry.brief, depthKey)
+      if (runId) {
+        addRun({
+          id: runId, shortlistId: entry.id, brand: entry.brief.brand,
+          preset: depthKey, startedAt: Date.now(), status: "running",
+        })
+        setStartedHint(true)
+        window.setTimeout(() => setStartedHint(false), 7000)
+      } else {
+        const n = appendDemoBatch(entry.id, DEMO_BATCH[depthKey] ?? 4)
+        setJustAdded(n)
+        window.setTimeout(() => setJustAdded(null), 4000)
+        refresh()
+      }
     } finally {
       setAdding(false)
-      refresh()
     }
   }
 
@@ -211,7 +234,7 @@ export function Shortlist() {
               disabled={!canAdd || adding}
               title={canAdd ? "Source & vet more creators into this shortlist" : "No more demo creators — deploy the backend to source live"}
             >
-              {adding ? "Sourcing…" : "Add more"}
+              {adding ? "Starting…" : "Add more"}
             </Button>
             <Button size="sm" leadingIcon={<Share2 size={15} />} onClick={() => setShowExport(true)}>
               Export
@@ -219,12 +242,21 @@ export function Shortlist() {
           </div>
         </div>
 
-        {/* live-sourcing progress + accumulation feedback */}
+        {/* run start + accumulation feedback (live progress lives in the run dock) */}
         {adding && (
           <p className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-500">
-            <Loader2 size={12} className="animate-spin" />
-            Sourcing &amp; vetting live creators — a real run can take a minute or two.
+            <Loader2 size={12} className="animate-spin" /> Starting a live run…
           </p>
+        )}
+        {startedHint && (
+          <motion.p
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-2 text-[12px] font-medium text-brand"
+          >
+            Live sourcing started — follow it in the run dock (bottom-right). It keeps going even
+            if you leave, refresh, or close the tab, and merges in when it's done.
+          </motion.p>
         )}
         {justAdded !== null && (
           <motion.p

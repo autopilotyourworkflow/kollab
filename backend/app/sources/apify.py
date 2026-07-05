@@ -31,6 +31,12 @@ from app.sources.base import KOLSource, Presentation
 TIKTOK_SCRAPER_ACTOR = "clockworks/tiktok-scraper"
 TIKTOK_COMMENTS_ACTOR = "clockworks/tiktok-comments-scraper"
 
+
+class RunCancelled(Exception):
+    """Raised inside the sourcing loop when the user stopped the run. Deliberately NOT
+    a RuntimeError, so it bypasses the live-error handling and is recorded as a clean
+    'cancelled', not a failure."""
+
 # Tier bands aligned with the seed cohort's labeling (k8 239K = mid, k4 486K = macro).
 TIER_MID_MIN = 100_000
 TIER_MACRO_MIN = 400_000
@@ -194,7 +200,8 @@ class ApifyAdapter(KOLSource):
     def __init__(self, token: str | None = None, budget_usd: float = 5.0,
                  client=None, max_creators: int = 12, videos_per_creator: int = 20,
                  comments_per_creator: int = 120, results_per_query: int = 100,
-                 exclude_handles: set[str] | None = None, region: str = "TH"):
+                 exclude_handles: set[str] | None = None, region: str = "TH",
+                 cancel_check=None):
         self.token = token
         self.budget = BudgetMeter(budget_usd)
         self._client = client
@@ -202,6 +209,10 @@ class ApifyAdapter(KOLSource):
         self.videos_per_creator = videos_per_creator
         self.comments_per_creator = comments_per_creator
         self.results_per_query = results_per_query
+        # Optional () -> bool the loop polls at phase boundaries; True stops the run.
+        # (An external abort of the Apify run makes the blocking search call return so
+        # this check is reached quickly after a stop.)
+        self.cancel_check = cancel_check
         # ISO country routed via the scraper's proxy so search returns local
         # creators (default Thailand). "None"/"" -> global.
         self.region = (region or "").strip().upper()
@@ -239,6 +250,10 @@ class ApifyAdapter(KOLSource):
             return []
         return list(client.dataset(dataset_id).iterate_items())
 
+    def _raise_if_cancelled(self) -> None:
+        if self.cancel_check and self.cancel_check():
+            raise RunCancelled("run stopped by user")
+
     # ── the loop ────────────────────────────────────────────────────────────
     def fetch_candidates(self, brief: ClientBrief) -> list[RawKOL]:
         if brief is None:
@@ -263,6 +278,7 @@ class ApifyAdapter(KOLSource):
             search_input["proxyCountryCode"] = self.region  # Thai proxy -> Thai results
         video_items = self._run_actor(client, TIKTOK_SCRAPER_ACTOR, search_input)
         self.budget.results += len(video_items)
+        self._raise_if_cancelled()  # user stopped during the (slow) search phase
 
         # 2) group by author; most on-query videos first (relevance proxy)
         by_author: dict[str, list[dict]] = defaultdict(list)
@@ -309,6 +325,7 @@ class ApifyAdapter(KOLSource):
 
         # One comments-actor run for every selected post, then map each comment back
         # to its creator by the post URL it was scraped from.
+        self._raise_if_cancelled()  # user stopped before the comment-sampling spend
         comments_by_url: dict[str, list[dict]] = defaultdict(list)
         all_urls = [u for (_, urls) in chosen for u in urls]
         if all_urls:
