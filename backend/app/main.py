@@ -55,10 +55,14 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://kollab-64c.pages.dev",
+        "https://kollab.autopilotyourworkflow.com",  # production custom domain
+        "https://kollab-64c.pages.dev",               # Pages project domain
         "http://localhost:5178",
         "http://localhost:5173",
     ],
+    # Cloudflare Pages preview deploys get a per-commit subdomain
+    # (<hash>.kollab-64c.pages.dev) — allow those too so preview links run live.
+    allow_origin_regex=r"https://[a-z0-9-]+\.kollab-64c\.pages\.dev",
     allow_methods=["*"],
     allow_headers=["*"],
 )
