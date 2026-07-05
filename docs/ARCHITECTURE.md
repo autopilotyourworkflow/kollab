@@ -118,6 +118,14 @@ lists each signal and its grounding.
   the API contract/UI** — that wiring is roadmap; no confidence number is shown anywhere
   until it is a computed one.
 
+### `app/store.py`
+Run-history store (single-tenant, stdlib sqlite3): which creators each brand has already
+pulled. Powers **Expand runs** — `POST /api/shortlist?expand=1` excludes known handles
+*before* any comment spend, so "get me more" buys new evidence instead of re-paying for
+held data (`?exclude=@handle` adds explicit skips; `excludedKnown` in the response reports
+the dedup). `KOLLAB_DB` relocates the file to a persistent volume; losing the history is
+safe — worst case is re-buying data, never wrong results.
+
 ### `app/pipeline.py` + `app/main.py`
 `build_shortlist` wires it end-to-end and projects a real per-run cost from actual data volume
 using the verified Apify prices ($0.50/1k comments, $1.70/1k results). It prefers the dataset's

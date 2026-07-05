@@ -7,7 +7,7 @@ SeedDatasetSource. CORS is open to the Pages demo + localhost dev.
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
@@ -19,6 +19,7 @@ from app.schemas import BrandDnaRequest, BrandDnaResponse, ClientBrief, Shortlis
 from app.sources.apify import ApifyAdapter
 from app.sources.plans import public_payload, resolve_plan
 from app.sources.seed import SeedDatasetSource
+from app.store import known_handles, record_run
 
 app = FastAPI(
     title="Kollab API",
@@ -109,12 +110,29 @@ def post_shortlist(
     creators: int | None = None,
     comments: int | None = None,
     cap_usd: float | None = None,
+    expand: bool = False,
+    exclude: list[str] = Query(default=[]),
 ) -> ShortlistResponse:
     """Run the pipeline for a supplied brief. In fixtures mode the candidate set is
     the curated cohort; with a live source it sources against the brief at the
     requested run depth (?preset=scan|standard|deep, optional creators/comments
-    overrides, cap_usd never exceeding the server ceiling)."""
-    return _run_pipeline(_make_source(preset, creators, comments, cap_usd), brief=brief)
+    overrides, cap_usd never exceeding the server ceiling).
+
+    Expand runs never buy the same data twice: `?expand=1` skips every creator
+    this brand has pulled before (run-history store) and `?exclude=@handle` adds
+    explicit skips — their slots fill with NEW creators, and `excludedKnown`
+    reports how many were deduplicated."""
+    source = _make_source(preset, creators, comments, cap_usd)
+    if isinstance(source, ApifyAdapter):
+        skip = set(exclude)
+        if expand:
+            skip |= known_handles(brief.brand)
+        source.exclude_handles = {h.strip().lstrip("@").lower() for h in skip}
+    response = _run_pipeline(source, brief=brief)
+    if isinstance(source, ApifyAdapter):
+        record_run(brief.brand, [k.handle for k in response.kols])
+        response.excluded_known = int(source.last_run.get("excluded_known", 0))
+    return response
 
 
 @app.get("/api/run-plans")

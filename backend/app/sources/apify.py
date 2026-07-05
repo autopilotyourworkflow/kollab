@@ -176,7 +176,8 @@ class ApifyAdapter(KOLSource):
 
     def __init__(self, token: str | None = None, budget_usd: float = 5.0,
                  client=None, max_creators: int = 12, videos_per_creator: int = 20,
-                 comments_per_creator: int = 120, results_per_query: int = 100):
+                 comments_per_creator: int = 120, results_per_query: int = 100,
+                 exclude_handles: set[str] | None = None):
         self.token = token
         self.budget = BudgetMeter(budget_usd)
         self._client = client
@@ -184,6 +185,12 @@ class ApifyAdapter(KOLSource):
         self.videos_per_creator = videos_per_creator
         self.comments_per_creator = comments_per_creator
         self.results_per_query = results_per_query
+        # Expand-run dedup: creators the brand already holds. They are skipped
+        # BEFORE any comment spend and their slots fill with NEW creators —
+        # a re-run buys new evidence, never the same data twice. (Their video
+        # items still appear in the bulk search; that part is not addressable
+        # per-author.)
+        self.exclude_handles = {h.strip().lstrip("@").lower() for h in (exclude_handles or set())}
         self._brief: ClientBrief | None = None
         self.last_run: dict = {}
 
@@ -242,11 +249,24 @@ class ApifyAdapter(KOLSource):
                 by_author[author_id].append(item)
         ranked_authors = sorted(by_author, key=lambda a: len(by_author[a]), reverse=True)
 
-        # 3) per creator: comment sample for their top posts, budget-gated
+        # 3) per creator: comment sample for their top posts, budget-gated.
+        #    Known creators (Expand run) are skipped before any spend so their
+        #    slots fill with new ones.
         vertical = infer_vertical(brief)
         kols: list[RawKOL] = []
         partial = False
-        for author_id in ranked_authors[: self.max_creators]:
+        excluded_known = 0
+        selected: list[str] = []
+        for author_id in ranked_authors:
+            if len(selected) >= self.max_creators:
+                break
+            meta = (by_author[author_id][0].get("authorMeta") or {})
+            handle = str(meta.get("name") or "").strip().lstrip("@").lower()
+            if handle and handle in self.exclude_handles:
+                excluded_known += 1
+                continue
+            selected.append(author_id)
+        for author_id in selected:
             vids = sorted(by_author[author_id],
                           key=lambda v: int((v.get("stats") or v).get("playCount") or 0),
                           reverse=True)[: self.videos_per_creator]
@@ -270,11 +290,12 @@ class ApifyAdapter(KOLSource):
         self.last_run = {
             "queries": queries,
             "creators": len(kols),
+            "excluded_known": excluded_known,
             "results": self.budget.results,
             "comments": self.budget.comments,
             "spent_usd": self.budget.spent_usd,
             "cap_usd": self.budget.cap_usd,
-            "partial": partial or len(ranked_authors) > self.max_creators,
+            "partial": partial or len(ranked_authors) - excluded_known > self.max_creators,
         }
         return kols
 

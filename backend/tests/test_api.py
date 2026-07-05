@@ -78,6 +78,18 @@ def test_apify_source_get_without_brief_answers_400(monkeypatch):
     assert "brief" in r.json()["detail"].lower()
 
 
+def test_expand_params_are_a_noop_on_the_seed_source():
+    # expand/exclude only affect live sourcing; fixtures mode ignores them and
+    # reports zero dedup rather than erroring.
+    brief = {
+        "brand": "Test", "brandTh": "เทสต์", "category": "Skincare",
+        "audience": "Thai women", "pillars": ["a"], "region": "BKK", "website": "x.co",
+    }
+    r = client.post("/api/shortlist?expand=1&exclude=@someone", json=brief)
+    assert r.status_code == 200
+    assert r.json()["excludedKnown"] == 0
+
+
 def test_brand_dna_endpoint_degrades_honestly(monkeypatch):
     # No LLM keys + unreachable site -> rules skeleton, flagged degraded, source named.
     import app.main as main_mod

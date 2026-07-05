@@ -122,6 +122,9 @@ class ShortlistResponse(CamelModel):
     cost: CostMeter
     source: str  # "seed" | "apify" — which adapter produced the candidates
     degraded: bool = False  # True if brand ingest fell back to a lower tier
+    # Expand-run dedup: known creators skipped before any spend (0 on fresh runs
+    # and in fixtures mode).
+    excluded_known: int = 0
 
 
 class BrandDnaRequest(CamelModel):

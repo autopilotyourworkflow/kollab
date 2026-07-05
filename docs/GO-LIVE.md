@@ -45,6 +45,10 @@ python -m uvicorn app.main:app --reload
 #       POST /api/shortlist?preset=scan  with a brief, KOLLAB_SOURCE=apify
 #       ^ the FIRST live actor run is a calibration run — inspect the pull
 #         before trusting numbers.
+#       POST /api/shortlist?preset=scan&expand=1  -> a second run that skips
+#         every creator the brand already holds (dedup reported in
+#         excludedKnown). History lives in kollab.db (KOLLAB_DB to relocate;
+#         ephemeral on Render free tier — losing it only means re-buying data).
 ```
 
 ## 3. Render deploy (live backend)
