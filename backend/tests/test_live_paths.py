@@ -79,11 +79,19 @@ def _video_item(author_id: str, fans: int, i: int, plays: int = 50_000) -> dict:
     }
 
 
-def _comment_item(i: int) -> dict:
+def _comment_item(i: int, url: str = "https://www.tiktok.com/@a/video/1") -> dict:
     return {"cid": f"c{i}", "uid": f"u{i}", "uniqueId": f"user{i}", "text": f"ดีมากค่ะ {i}",
             "diggCount": 2, "replyCommentTotal": 0,
             "createTimeISO": "2026-06-20T01:00:00Z",
-            "videoWebUrl": "https://www.tiktok.com/@a/video/1"}
+            "videoWebUrl": url}
+
+
+def _comments_response(run_input) -> list[dict]:
+    """Batched comments actor: return comments tagged with each requested post URL
+    (10 per post), mirroring the real actor's videoWebUrl echo so the adapter can
+    map each comment back to its creator."""
+    urls = run_input.get("postURLs", [])
+    return [_comment_item(i, url=u) for u in urls for i in range(10)]
 
 
 def _search_response(run_input) -> list[dict]:
@@ -97,7 +105,7 @@ def _search_response(run_input) -> list[dict]:
 def test_apify_loop_assembles_budgeted_kols():
     fake = FakeApifyClient({
         TIKTOK_SCRAPER_ACTOR: _search_response,
-        TIKTOK_COMMENTS_ACTOR: lambda run_input: [_comment_item(i) for i in range(30)],
+        TIKTOK_COMMENTS_ACTOR: _comments_response,
     })
     adapter = ApifyAdapter(client=fake, budget_usd=5.0, results_per_query=50)
     kols = adapter.fetch_candidates(BRIEF)
@@ -106,12 +114,14 @@ def test_apify_loop_assembles_budgeted_kols():
     tiers = {k.profile.author_id: k.tier for k in kols}
     assert tiers == {"a1": "micro", "a2": "mid"}
     assert all(k.vertical == "beauty" for k in kols)
+    # each creator's 3 posts x 10 comments, mapped back from the single batch by url
     assert all(len(k.videos) == 6 and len(k.comments) == 30 for k in kols)
     assert adapter.last_run["creators"] == 2
     assert adapter.last_run["spent_usd"] <= 5.0
-    # comments actor was called once per creator with its top post urls
+    # comments are pulled in ONE batched actor call for all creators' posts
     comment_calls = [c for c in fake.calls if c[0] == TIKTOK_COMMENTS_ACTOR]
-    assert len(comment_calls) == 2 and comment_calls[0][1]["postURLs"]
+    assert len(comment_calls) == 1
+    assert len(comment_calls[0][1]["postURLs"]) == 6  # 3 posts x 2 creators
     # topic score on the live path is the lexical fallback with a grounded rationale
     pres = adapter.presentation(kols[0])
     assert pres.topic_score > 0 and "overlap" in (pres.topic_rationale or "")

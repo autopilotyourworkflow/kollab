@@ -104,6 +104,13 @@ def _to_iso(ts) -> str:
     return str(ts)
 
 
+def _norm_url(url: str) -> str:
+    """Normalize a TikTok post URL so a scraped comment maps back to its video
+    (drop query, fragment, and trailing slash — the actor may echo the URL with
+    tracking params)."""
+    return url.split("?")[0].split("#")[0].rstrip("/")
+
+
 # ── Pure mappers (actor JSON → our boundary model) ──────────────────────────
 def parse_profile_item(item: dict) -> RawProfile:
     """Map a clockworks/tiktok-scraper profile item to RawProfile."""
@@ -265,12 +272,12 @@ class ApifyAdapter(KOLSource):
                 by_author[author_id].append(item)
         ranked_authors = sorted(by_author, key=lambda a: len(by_author[a]), reverse=True)
 
-        # 3) per creator: comment sample for their top posts, budget-gated.
-        #    Known creators (Expand run) are skipped before any spend so their
-        #    slots fill with new ones.
+        # 3) select creators (Expand-run dedup skips known ones BEFORE any spend so
+        #    their slots fill with new ones), then pull comments for ALL of them in a
+        #    SINGLE batched actor call. One Apify run instead of one-per-creator is
+        #    the wall-time win that lets a live run finish in ~a minute rather than
+        #    stacking a container startup per creator.
         vertical = infer_vertical(brief)
-        kols: list[RawKOL] = []
-        partial = False
         excluded_known = 0
         selected: list[str] = []
         for author_id in ranked_authors:
@@ -282,22 +289,40 @@ class ApifyAdapter(KOLSource):
                 excluded_known += 1
                 continue
             selected.append(author_id)
+
+        # Per creator: top videos + up to 3 post URLs. Budget-gate on the cumulative
+        # projected comment volume; stop adding creators before crossing the cap.
+        chosen: list[tuple[list[dict], list[str]]] = []
+        projected_comments = 0
+        partial = False
         for author_id in selected:
             vids = sorted(by_author[author_id],
                           key=lambda v: int((v.get("stats") or v).get("playCount") or 0),
                           reverse=True)[: self.videos_per_creator]
             post_urls = [v.get("webVideoUrl") for v in vids[:3] if v.get("webVideoUrl")]
-            want_comments = self.comments_per_creator if post_urls else 0
-            if not self.budget.can_afford(extra_comments=want_comments):
+            want = self.comments_per_creator if post_urls else 0
+            if not self.budget.can_afford(extra_comments=projected_comments + want):
                 partial = True  # honest partial pull: stop before crossing the cap
                 break
-            comment_items: list[dict] = []
-            if post_urls:
-                comment_items = self._run_actor(client, TIKTOK_COMMENTS_ACTOR, {
-                    "postURLs": post_urls,
-                    "commentsPerPost": max(1, want_comments // len(post_urls)),
-                })
-                self.budget.comments += len(comment_items)
+            projected_comments += want
+            chosen.append((vids, post_urls))
+
+        # One comments-actor run for every selected post, then map each comment back
+        # to its creator by the post URL it was scraped from.
+        comments_by_url: dict[str, list[dict]] = defaultdict(list)
+        all_urls = [u for (_, urls) in chosen for u in urls]
+        if all_urls:
+            raw_comments = self._run_actor(client, TIKTOK_COMMENTS_ACTOR, {
+                "postURLs": all_urls,
+                "commentsPerPost": max(1, self.comments_per_creator // 3),
+            })
+            self.budget.comments += len(raw_comments)
+            for c in raw_comments:
+                comments_by_url[_norm_url(str(c.get("videoWebUrl") or ""))].append(c)
+
+        kols: list[RawKOL] = []
+        for vids, post_urls in chosen:
+            comment_items = [c for u in post_urls for c in comments_by_url.get(_norm_url(u), [])]
             profile_item = vids[0]  # authorMeta rides on every video item
             fans = int(((profile_item.get("authorMeta") or {}).get("fans")) or 0)
             kols.append(assemble_kol(profile_item, vids, comment_items,
