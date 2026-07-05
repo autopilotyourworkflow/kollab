@@ -16,10 +16,11 @@ import {
 } from "lucide-react"
 import { Button } from "../components/ui/Button"
 import { ProvenanceChip } from "../components/ui/ProvenanceChip"
-import { client, brandDna } from "../data/kols"
-import { saveBrief } from "../lib/api"
+import { client, brandDna, kols as demoKols, summary as demoSummary, cost as demoCost } from "../data/kols"
 import { authHeaders } from "../lib/credentials"
 import { apiBase, fetchCredit, runExceedsCredit, type CreditInfo } from "../lib/credit"
+import { createEntry } from "../lib/workspace"
+import type { ClientBrief } from "../lib/types"
 import {
   defaultCap,
   defaultPlan,
@@ -605,10 +606,25 @@ export function NewShortlist() {
             </Button>
             <Button
               onClick={() => {
-                // persist the AM's edits + chosen run depth — the run screen reads them back
-                saveBrief({ audience, tone, region, pillars })
+                // Create the shortlist (its own campaign in the workspace) from the
+                // edited brief + this run's results, then run the pipeline animation
+                // which lands on the new shortlist's page.
+                const brief: ClientBrief = {
+                  brand: live?.brand ?? client.brand,
+                  brandTh: live?.brandTh ?? client.brandTh,
+                  category: live?.category ?? client.category,
+                  audience,
+                  pillars,
+                  region,
+                  website: url.trim() || client.website,
+                }
+                const entry = createEntry(brief, demoKols, {
+                  source: "fixtures",
+                  screened: demoSummary.screened,
+                  cost: demoCost,
+                })
                 saveRunPlan(plan)
-                navigate("/app/run")
+                navigate(`/app/run?id=${entry.id}`)
               }}
               trailingIcon={<ArrowRight size={16} />}
             >

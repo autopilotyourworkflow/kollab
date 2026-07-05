@@ -88,6 +88,32 @@ export function useShortlist(): ShortlistData {
   return data
 }
 
+/** Live expand-run: pull MORE creators for a brief the shortlist already has, on the
+    backend that never re-buys held data (POST /api/shortlist?expand=1). Returns the
+    fresh Kol[] or null when there's no backend / it fails — the caller then falls
+    back to the demo expansion pool so accumulation always works. */
+export async function expandShortlist(brief: ClientBrief): Promise<Kol[] | null> {
+  const base = (import.meta.env.VITE_API_URL as string | undefined) ?? ""
+  if (!base) return null
+  try {
+    const { authHeaders } = await import("./credentials")
+    const ctrl = new AbortController()
+    const t = window.setTimeout(() => ctrl.abort(), 30_000)
+    const res = await fetch(`${base}/api/shortlist?expand=1`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify(brief),
+      signal: ctrl.signal,
+    })
+    window.clearTimeout(t)
+    if (!res.ok) return null
+    const data = (await res.json()) as { kols?: Kol[] }
+    return Array.isArray(data.kols) ? data.kols : null
+  } catch {
+    return null
+  }
+}
+
 /** The account manager's edited brief from /app/new, if any (persisted HITL). */
 export interface SavedBrief {
   audience: string

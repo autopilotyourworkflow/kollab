@@ -1,10 +1,31 @@
 import { useMemo, useState, useEffect } from "react"
-import { useOutletContext } from "react-router-dom"
+import { useOutletContext, useParams, Navigate, Link } from "react-router-dom"
 import { AnimatePresence, motion } from "motion/react"
-import { ShieldAlert, Globe, ArrowUpDown, SearchX, Share2, Search as SearchIcon } from "lucide-react"
+import {
+  ShieldAlert,
+  Globe,
+  ArrowUpDown,
+  SearchX,
+  Share2,
+  Search as SearchIcon,
+  Plus,
+  Loader2,
+  ArrowLeft,
+} from "lucide-react"
 import type { HitlStatus, Kol } from "../lib/types"
 import { cn } from "../lib/cn"
-import { useShortlist, loadSavedBrief } from "../lib/api"
+import { expandShortlist } from "../lib/api"
+import { apiBase } from "../lib/credit"
+import {
+  getEntry,
+  setDecision as persistDecision,
+  appendDemoBatch,
+  appendKols,
+  markSourceLive,
+  demoRemaining,
+  counts,
+  type ShortlistEntry,
+} from "../lib/workspace"
 import { KolRow, COLS } from "../components/shortlist/KolRow"
 import { ExportModal } from "../components/shortlist/ExportModal"
 import { Button } from "../components/ui/Button"
@@ -47,30 +68,53 @@ function useIsMobile() {
 }
 
 export function Shortlist() {
+  const { id = "" } = useParams()
   const { search, setSearch } = useOutletContext<AppContext>()
-  const data = useShortlist()
-  // the AM's edited brief from /app/new (persisted HITL) overrides the fixture brief
-  const savedBrief = useMemo(loadSavedBrief, [])
-  const audience = savedBrief?.audience ?? data.brief.audience
-  const pillars = savedBrief?.pillars ?? data.brief.pillars
+  const [entry, setEntry] = useState<ShortlistEntry | null>(() => getEntry(id))
+  const refresh = () => setEntry(getEntry(id))
+
   const [filter, setFilter] = useState<Filter>("all")
   const [sort, setSort] = useState<SortKey>("fit")
   const [showExport, setShowExport] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [justAdded, setJustAdded] = useState<number | null>(null)
   const isMobile = useIsMobile()
-  const [statuses, setStatuses] = useState<Record<string, { status: HitlStatus; reason?: string }>>(
-    () => Object.fromEntries(data.kols.map((k) => [k.id, { status: k.hitl }])),
-  )
-  // keep HITL decisions when the payload swaps from fixtures to the live API
-  useEffect(() => {
-    setStatuses((s) => Object.fromEntries(data.kols.map((k) => [k.id, s[k.id] ?? { status: k.hitl }])))
-  }, [data.kols])
 
-  const setDecision = (id: string, status: HitlStatus, reason?: string) =>
-    setStatuses((s) => ({ ...s, [id]: status === "pending" ? { status: "pending" } : { status, reason } }))
+  const kols = useMemo(() => entry?.kols ?? [], [entry])
+
+  const setDecision = (kolId: string, status: HitlStatus, reason?: string) => {
+    if (!entry) return
+    persistDecision(entry.id, kolId, { status, reason })
+    refresh()
+  }
+
+  // "Add more results": accumulate NEW creators into this same shortlist. A live
+  // backend does a real expand-run (never re-buys held data); with no backend the
+  // demo pool stands in so accumulation is visible either way.
+  const addMore = async () => {
+    if (!entry || adding) return
+    setAdding(true)
+    setJustAdded(null)
+    try {
+      let added = 0
+      if (apiBase()) {
+        const live = await expandShortlist(entry.brief)
+        added = live && live.length ? appendKols(entry.id, live) : appendDemoBatch(entry.id)
+        if (added && live?.length) markSourceLive(entry.id)
+      } else {
+        added = appendDemoBatch(entry.id)
+      }
+      setJustAdded(added)
+      window.setTimeout(() => setJustAdded(null), 4000)
+    } finally {
+      setAdding(false)
+      refresh()
+    }
+  }
 
   const q = search.trim().toLowerCase()
   const rows = useMemo(() => {
-    const sorted = [...data.kols].sort((a, b) => {
+    const sorted = [...kols].sort((a, b) => {
       if (sort === "followers") return b.followers - a.followers
       if (sort === "engagement") return b.engagementRate - a.engagementRate
       if (sort === "risk") return riskRank[b.risk.level] - riskRank[a.risk.level] || b.fitScore - a.fitScore
@@ -81,81 +125,111 @@ export function Shortlist() {
       return searched.filter((k) => k.risk.level === "clear" && k.fitScore >= 70)
     if (filter === "flagged") return searched.filter((k) => k.risk.level !== "clear")
     return searched
-  }, [filter, sort, q, data.kols])
+  }, [filter, sort, q, kols])
 
-  // tab counts respect the active search, so the numbers never lie
   const searchedAll = useMemo(
-    () => (q ? data.kols.filter((k) => matchesSearch(k, q)) : data.kols),
-    [q, data.kols],
+    () => (q ? kols.filter((k) => matchesSearch(k, q)) : kols),
+    [q, kols],
   )
-  const counts: Record<Filter, number> = {
+
+  // A missing/deleted id sends the user back to the Dashboard rather than a blank page.
+  if (!entry) return <Navigate to="/app" replace />
+
+  const c = counts(kols)
+  const counts_by: Record<Filter, number> = {
     all: searchedAll.length,
     recommended: searchedAll.filter((k) => k.risk.level === "clear" && k.fitScore >= 70).length,
     flagged: searchedAll.filter((k) => k.risk.level !== "clear").length,
   }
-  // headline totals (search-independent) — all derived from the active payload
   const totals = {
-    recommended: data.kols.filter((k) => k.risk.level === "clear" && k.fitScore >= 70).length,
-    flagged: data.kols.filter((k) => k.risk.level !== "clear").length,
-    failed: data.kols.filter((k) => k.risk.level === "high").length,
+    recommended: c.recommended,
+    flagged: c.flagged,
+    failed: kols.filter((k) => k.risk.level === "high").length,
   }
+  const audience = entry.brief.audience
+  const pillars = entry.brief.pillars
+  const remaining = demoRemaining(entry.id)
+  const canAdd = remaining > 0 || !!apiBase()
 
   return (
     <div className="px-[var(--d-page-px)] py-[var(--d-page-py)]">
+      <Link
+        to="/app"
+        className="mb-3 inline-flex min-h-[28px] items-center gap-1.5 text-[12px] font-medium text-ink-500 transition-colors duration-200 hover:text-brand"
+      >
+        <ArrowLeft size={14} /> All shortlists
+      </Link>
+
       {/* Header */}
       <div className="mb-[var(--d-block-gap)]">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-[26px] font-bold tracking-[-0.02em] text-ink">
-              {data.brief.brand}{" "}
-              <span className="font-thai font-semibold text-ink-400">· {data.brief.brandTh}</span>
+              {entry.brief.brand}{" "}
+              <span className="font-thai font-semibold text-ink-400">· {entry.brief.brandTh}</span>
             </h1>
             <p className="mt-1 max-w-2xl text-[13px] font-medium text-ink-500">{audience}</p>
           </div>
           <div className="flex items-center gap-2">
-            {/* fictional demo brand — deliberately NOT a link (no live site to 404 on) */}
             <span
               title="Fictional demo brand — no live website"
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-[12px] font-medium text-ink-700 shadow-xs"
+              className="hidden items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-[12px] font-medium text-ink-700 shadow-xs sm:inline-flex"
             >
               <Globe size={14} className="text-ink-400" />
-              {data.brief.website}
+              {entry.brief.website}
             </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              leadingIcon={adding ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+              onClick={addMore}
+              disabled={!canAdd || adding}
+              title={canAdd ? "Source & vet more creators into this shortlist" : "No more demo creators — deploy the backend to source live"}
+            >
+              {adding ? "Sourcing…" : "Add more"}
+            </Button>
             <Button size="sm" leadingIcon={<Share2 size={15} />} onClick={() => setShowExport(true)}>
               Export
             </Button>
           </div>
         </div>
 
-        {/* pillars + stat chips — their tint language; all numbers derive from the payload */}
+        {/* accumulation feedback */}
+        {justAdded !== null && (
+          <motion.p
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={cn("mt-2 text-[12px] font-medium", justAdded > 0 ? "text-verified-fg" : "text-ink-500")}
+          >
+            {justAdded > 0
+              ? `+${justAdded} new creator${justAdded === 1 ? "" : "s"} sourced, vetted, and merged — no duplicates.`
+              : "No new creators to add right now."}
+          </motion.p>
+        )}
+
         <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
           <div className="flex flex-wrap items-center gap-1.5">
             {pillars.map((p) => (
-              <span
-                key={p}
-                className="rounded-full bg-brand-50 px-3 py-1 text-[12px] font-medium text-brand"
-              >
+              <span key={p} className="rounded-full bg-brand-50 px-3 py-1 text-[12px] font-medium text-brand">
                 {p}
               </span>
             ))}
-            {savedBrief && (
-              <span
-                title="This brief was edited on the New-shortlist step"
-                className="rounded-full border border-dashed border-border-strong px-2.5 py-1 text-[11px] font-medium text-ink-500"
-              >
-                brief edited
-              </span>
-            )}
+            <span
+              title={`${entry.runs} run${entry.runs === 1 ? "" : "s"} accumulated into this shortlist`}
+              className="rounded-full border border-dashed border-border-strong px-2.5 py-1 text-[11px] font-medium text-ink-500"
+            >
+              {entry.runs} {entry.runs === 1 ? "run" : "runs"}
+            </span>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2.5">
-            <StatChip value={data.screened} label="screened" tone="ink" className="bg-panel" />
+            <StatChip value={kols.length} label="creators" tone="ink" className="bg-panel" />
             <StatChip value={totals.recommended} label="recommended" />
             <StatChip value={totals.flagged} label="flagged" tone="risk" className="bg-risk-high-bg" />
           </div>
         </div>
       </div>
 
-      {/* Flagged banner — the hero framing; every number derives from the data */}
+      {/* Flagged banner */}
       {totals.failed > 0 && (
         <button
           onClick={() => setFilter("flagged")}
@@ -179,7 +253,7 @@ export function Shortlist() {
         </button>
       )}
 
-      {/* Mobile/tablet search — the topbar field only exists ≥lg */}
+      {/* Mobile/tablet search */}
       <div className="relative mb-3 lg:hidden">
         <SearchIcon size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-400" />
         <input
@@ -204,7 +278,6 @@ export function Shortlist() {
                 filter === f.key ? "text-white" : "text-ink-500 hover:bg-surface",
               )}
             >
-              {/* active pill slides between tabs */}
               {filter === f.key && (
                 <motion.span
                   layoutId="filter-pill"
@@ -214,7 +287,7 @@ export function Shortlist() {
               )}
               <span className="relative">{f.label}</span>
               <span className={cn("tnum relative ml-1.5", filter === f.key ? "text-white/70" : "text-ink-400")}>
-                {counts[f.key]}
+                {counts_by[f.key]}
               </span>
             </button>
           ))}
@@ -251,7 +324,7 @@ export function Shortlist() {
             <div className="max-w-xs text-[12px] text-ink-500">
               {q
                 ? "Try a handle, a category, or a fraud signal — e.g. “comment pod”."
-                : "No creators match the current filter. Try “All screened”, or adjust the brand brief and re-run."}
+                : "No creators match the current filter. Try “All screened”, or Add more to source new ones."}
             </div>
             <button
               onClick={() => (q ? setSearch("") : setFilter("all"))}
@@ -276,7 +349,7 @@ export function Shortlist() {
                     variant="card"
                     kol={kol}
                     rank={i + 1}
-                    decision={statuses[kol.id]}
+                    decision={entry.decisions[kol.id] ?? { status: kol.hitl }}
                     onDecide={(status, reason) => setDecision(kol.id, status, reason)}
                   />
                 </motion.div>
@@ -300,7 +373,6 @@ export function Shortlist() {
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-500">Fit score</div>
                 <div />
               </div>
-              {/* rows fade in/out on filter+search and glide on re-sort */}
               <AnimatePresence initial={false} mode="popLayout">
                 {rows.map((kol, i) => (
                   <motion.div
@@ -315,7 +387,7 @@ export function Shortlist() {
                       variant="row"
                       kol={kol}
                       rank={i + 1}
-                      decision={statuses[kol.id]}
+                      decision={entry.decisions[kol.id] ?? { status: kol.hitl }}
                       onDecide={(status, reason) => setDecision(kol.id, status, reason)}
                     />
                   </motion.div>
@@ -330,20 +402,21 @@ export function Shortlist() {
         <span
           className={cn(
             "mr-2 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium",
-            data.source === "api" ? "bg-verified-bg text-verified-fg" : "bg-panel text-ink-700",
+            entry.source === "api" ? "bg-verified-bg text-verified-fg" : "bg-panel text-ink-700",
           )}
         >
-          <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", data.source === "api" ? "bg-verified" : "bg-ink-400")} />
-          {data.source === "api" ? "served by the pipeline API · /api/shortlist" : "bundled fixtures (API unavailable)"}
+          <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", entry.source === "api" ? "bg-verified" : "bg-ink-400")} />
+          {entry.source === "api" ? "includes live-sourced creators · /api/shortlist" : "bundled demo fixtures"}
         </span>
-        Demo cohort is curated public-data fixtures. Every metric is tagged{" "}
+        Every metric is tagged{" "}
         <span className="font-medium text-ink-700">measured / inferred / estimated</span>; production points the data
-        adapter at a licensed KOL feed. Fraud-flagged handles are anonymised in the live run.
+        adapter at a licensed KOL feed. Fraud-flagged handles are anonymised in the live run. Decisions and added
+        creators are saved to this shortlist automatically.
       </p>
 
       <AnimatePresence>
         {showExport && (
-          <ExportModal kols={data.kols} brief={data.brief} onClose={() => setShowExport(false)} />
+          <ExportModal kols={kols} brief={entry.brief} onClose={() => setShowExport(false)} />
         )}
       </AnimatePresence>
     </div>

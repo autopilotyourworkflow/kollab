@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import { MotionConfig, motion } from "motion/react"
 import { Landing } from "./pages/Landing"
 import { AppShell } from "./components/app/AppShell"
+import { Dashboard } from "./pages/Dashboard"
 import { Shortlist } from "./pages/Shortlist"
 import { NewShortlist } from "./pages/NewShortlist"
 import { PipelineRun } from "./pages/PipelineRun"
@@ -33,8 +34,9 @@ function AnimatedRoutes() {
       <Routes location={location}>
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<AppShell />}>
-          <Route index element={<Shortlist />} />
-          <Route path="shortlist" element={<Shortlist />} />
+          <Route index element={<Dashboard />} />
+          <Route path="shortlist" element={<Navigate to="/app" replace />} />
+          <Route path="s/:id" element={<Shortlist />} />
           <Route path="new" element={<NewShortlist />} />
           <Route path="run" element={<PipelineRun />} />
           <Route path="settings" element={<Settings />} />

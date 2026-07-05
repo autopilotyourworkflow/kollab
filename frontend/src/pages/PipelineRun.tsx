@@ -3,7 +3,8 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { motion } from "motion/react"
 import { Check, Loader2, ShieldAlert, Gauge, ArrowRight, Sparkles, XCircle, RotateCcw, Layers } from "lucide-react"
 import { Button } from "../components/ui/Button"
-import { useShortlist, loadSavedBrief } from "../lib/api"
+import { client, summary, cost as demoCost } from "../data/kols"
+import { getEntry, counts } from "../lib/workspace"
 import { loadRunPlan } from "../lib/runPlan"
 import { cn } from "../lib/cn"
 
@@ -67,12 +68,17 @@ function StatusDot({ status, hero }: { status: "pending" | "active" | "done" | "
 export function PipelineRun() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const data = useShortlist()
-  const savedBrief = loadSavedBrief()
-  const pillarCount = (savedBrief?.pillars ?? data.brief.pillars).length
+  const id = searchParams.get("id") ?? ""
+  const entry = getEntry(id)
+  const c = entry ? counts(entry.kols) : { recommended: summary.recommended, flagged: summary.flagged }
+  const brand = entry?.brief.brand ?? client.brand
+  const screened = entry?.screened ?? summary.screened
+  const recommended = c.recommended
+  const flagged = c.flagged
+  const pillarCount = (entry?.brief.pillars ?? client.pillars).length
   const steps = useMemo(
-    () => buildSteps(data.screened, data.flagged, data.recommended, pillarCount),
-    [data.screened, data.flagged, data.recommended, pillarCount],
+    () => buildSteps(screened, flagged, recommended, pillarCount),
+    [screened, flagged, recommended, pillarCount],
   )
   const failMode = searchParams.get("fail") === "1"
   const failAt = 3 // the vet step
@@ -80,14 +86,14 @@ export function PipelineRun() {
   const [elapsed, setElapsed] = useState(0)
   const [errored, setErrored] = useState(false)
   const finished = index >= steps.length
-  const totalSeconds = data.cost.seconds
+  const totalSeconds = entry?.cost.seconds || demoCost.seconds || 1
   const plan = useMemo(loadRunPlan, []) // the depth chosen on the review step
 
   // advance steps
   useEffect(() => {
     if (errored) return
     if (finished) {
-      const t = window.setTimeout(() => navigate("/app"), 2600)
+      const t = window.setTimeout(() => navigate(id ? `/app/s/${id}` : "/app"), 2600)
       return () => window.clearTimeout(t)
     }
     if (failMode && index === failAt) {
@@ -96,7 +102,7 @@ export function PipelineRun() {
     }
     const t = window.setTimeout(() => setIndex((i) => i + 1), steps[index].ms)
     return () => window.clearTimeout(t)
-  }, [index, finished, errored, failMode, navigate, steps])
+  }, [index, finished, errored, failMode, navigate, steps, id])
 
   // live meter — tracks toward the pipeline's own projected cost/latency
   useEffect(() => {
@@ -120,13 +126,13 @@ export function PipelineRun() {
     setElapsed(0)
   }
 
-  const cost = ((elapsed / totalSeconds) * data.cost.usd).toFixed(2)
+  const cost = ((elapsed / totalSeconds) * (entry?.cost.usd ?? demoCost.usd)).toFixed(2)
 
   // announce progress to screen readers (visual state alone is not enough)
   const liveMessage = errored
     ? "The vetting step failed. You can retry or go back to the shortlist."
     : finished
-      ? `Shortlist ready: ${data.recommended} recommended, ${data.flagged} flagged. Opening the shortlist.`
+      ? `Shortlist ready: ${recommended} recommended, ${flagged} flagged. Opening the shortlist.`
       : `${steps[index].label}: ${steps[index].running}`
 
   return (
@@ -137,7 +143,7 @@ export function PipelineRun() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-[24px] font-bold tracking-[-0.02em] text-ink">
-            Finding KOLs for {data.brief.brand}
+            Finding KOLs for {brand}
           </h1>
           <p className="mt-1.5 text-[14px] text-ink-500">
             Sourcing, vetting for fraud, and ranking Thai TikTok creators on brand fit.
@@ -192,7 +198,7 @@ export function PipelineRun() {
                   </span>
                   {status === "done" && s.hero && (
                     <span className="inline-flex items-center gap-1 rounded-full border border-risk-high-border bg-risk-high-bg px-2 py-0.5 text-[11px] font-medium text-risk-high-fg">
-                      {data.flagged} flagged
+                      {flagged} flagged
                     </span>
                   )}
                 </div>
@@ -262,11 +268,11 @@ export function PipelineRun() {
               <div>
                 <div className="text-[14px] font-semibold text-ink">Shortlist ready</div>
                 <div className="text-[12px] text-ink-700">
-                  {data.recommended} recommended · {data.flagged} flagged · {elapsed.toFixed(1)}s · ${cost}
+                  {recommended} recommended · {flagged} flagged · {elapsed.toFixed(1)}s · ${cost}
                 </div>
               </div>
             </div>
-            <Button onClick={() => navigate("/app")} trailingIcon={<ArrowRight size={16} />}>
+            <Button onClick={() => navigate(id ? `/app/s/${id}` : "/app")} trailingIcon={<ArrowRight size={16} />}>
               View shortlist
             </Button>
           </motion.div>
