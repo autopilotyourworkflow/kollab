@@ -137,7 +137,7 @@ def apply_llm_rerank(
     Requires the English text to carry >=2 validated citations."""
     settings = get_settings()
     if call is None:
-        if not (settings.llm_rerank and settings.llm_enabled):
+        if not (settings.llm_rerank and settings.effective_llm_enabled):
             return response
         from app.llm import claude_text  # lazy
         call = claude_text

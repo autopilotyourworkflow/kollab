@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { motion } from "motion/react"
 import {
@@ -18,6 +18,8 @@ import { Button } from "../components/ui/Button"
 import { ProvenanceChip } from "../components/ui/ProvenanceChip"
 import { client, brandDna } from "../data/kols"
 import { saveBrief } from "../lib/api"
+import { authHeaders } from "../lib/credentials"
+import { apiBase, fetchCredit, runExceedsCredit, type CreditInfo } from "../lib/credit"
 import {
   defaultCap,
   defaultPlan,
@@ -50,7 +52,7 @@ async function tryLiveBrandDna(website: string): Promise<{
     const t = window.setTimeout(() => ctrl.abort(), 12_000)
     const res = await fetch(`${base}/api/brand-dna`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ website }),
       signal: ctrl.signal,
     })
@@ -134,6 +136,13 @@ export function NewShortlist() {
   const [customCreators, setCustomCreators] = useState(20)
   const [customComments, setCustomComments] = useState(120)
   const [capEdited, setCapEdited] = useState<number | null>(null)
+
+  // Live credit for the pre-run warning (only when a backend is configured — the
+  // static demo skips it). Reads whatever key this browser has stored.
+  const [credit, setCredit] = useState<CreditInfo | null>(null)
+  useEffect(() => {
+    if (apiBase()) fetchCredit().then(setCredit)
+  }, [])
 
   const currentPlan = (): RunPlanChoice => {
     if (planKey === "custom") {
@@ -544,6 +553,35 @@ export function NewShortlist() {
             )}
 
             <p className="mt-3 text-[12px] leading-relaxed text-ink-500">{planNote}</p>
+
+            {/* Pre-run low-credit warning — only with a live backend + a real balance */}
+            {credit?.apify.source === "none" ? (
+              <div className="mt-3 flex items-start gap-2.5 rounded-lg border border-risk-high-border bg-risk-high-bg px-3.5 py-2.5">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-risk-high-fg" />
+                <p className="text-[12px] leading-relaxed text-ink-700">
+                  <span className="font-semibold text-risk-high-fg">No live credit available.</span> A live run needs an
+                  Apify key.{" "}
+                  <Link to="/app/settings" className="font-medium text-brand hover:underline">
+                    Add your own key in Settings
+                  </Link>{" "}
+                  — it stays in your browser. The demo still runs free.
+                </p>
+              </div>
+            ) : runExceedsCredit(credit, plan.estUsd) ? (
+              <div className="mt-3 flex items-start gap-2.5 rounded-lg border border-risk-med-border bg-risk-med-bg px-3.5 py-2.5">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-risk-med-fg" />
+                <p className="text-[12px] leading-relaxed text-ink-700">
+                  <span className="font-semibold text-risk-med-fg">Heads up.</span> Run live, this depth's estimate (≈$
+                  {plan.estUsd.toFixed(2)}) is more than the {credit?.apify.source === "shared" ? "shared " : ""}credit
+                  left (≈${credit?.apify.remainingUsd?.toFixed(2)}). It would stop at the cap with a labeled partial
+                  result.{" "}
+                  <Link to="/app/settings" className="font-medium text-brand hover:underline">
+                    Add your own key
+                  </Link>{" "}
+                  or pick a smaller depth.
+                </p>
+              </div>
+            ) : null}
 
             <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3 text-[12px] text-ink-700">
               <span className="font-medium">Hard cap</span>

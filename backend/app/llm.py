@@ -15,7 +15,7 @@ def claude_text(prompt: str, max_tokens: int = 1200) -> str:
     import anthropic  # lazy: pip install .[live]
 
     s = get_settings()
-    msg = anthropic.Anthropic(api_key=s.anthropic_api_key).messages.create(
+    msg = anthropic.Anthropic(api_key=s.effective_anthropic_api_key).messages.create(
         model=s.claude_model,
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}],
@@ -29,7 +29,7 @@ def gemini_text(prompt: str) -> str:
     s = get_settings()
     r = httpx.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{s.gemini_model}:generateContent",
-        params={"key": s.gemini_api_key},
+        params={"key": s.effective_gemini_api_key},
         json={"contents": [{"parts": [{"text": prompt}]}]},
         timeout=30.0,
     )

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import type { ClientBrief, Kol } from "./types"
 import { kols as fixtureKols, client as fixtureClient, summary as fixtureSummary, cost as fixtureCost } from "../data/kols"
+import { authHeaders } from "./credentials"
 
 /** One shortlist payload, whichever source produced it. Shape == the backend's
     ShortlistResponse (camelCase); the bundled fixtures satisfy it too. */
@@ -55,7 +56,7 @@ export function getShortlist(): Promise<ShortlistData> {
       const base = (import.meta.env.VITE_API_URL as string | undefined) ?? ""
       const ctrl = new AbortController()
       const t = window.setTimeout(() => ctrl.abort(), 4000)
-      const res = await fetch(`${base}/api/shortlist`, { signal: ctrl.signal })
+      const res = await fetch(`${base}/api/shortlist`, { headers: authHeaders(), signal: ctrl.signal })
       window.clearTimeout(t)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: unknown = await res.json()

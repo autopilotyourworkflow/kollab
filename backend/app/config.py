@@ -5,6 +5,7 @@ env late see what they set."""
 
 from __future__ import annotations
 
+import contextvars
 import os
 import sys
 from dataclasses import dataclass, field
@@ -34,6 +35,50 @@ _load_local_dotenv()
 # project the cost meter and to enforce the live-run budget cap.
 PRICE_PER_1K_COMMENTS = 0.50   # clockworks/tiktok-comments-scraper
 PRICE_PER_1K_RESULTS = 1.70    # clockworks/tiktok-scraper
+
+
+# ── Bring-your-own-key: per-request credential override ──────────────────────
+# The reviewer can paste their OWN Apify / Anthropic key in the frontend Settings
+# page; those keys ride each API call as headers and are set here for the duration
+# of the request only — never written to disk, never logged, never returned. A
+# request without them falls back to the operator's env keys ONLY while sharing is
+# on (KOLLAB_SHARED_KEY). This ContextVar is per-asyncio-task, so requests never
+# see each other's keys.
+_request_credentials: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "kollab_request_credentials", default=None
+)
+
+
+def set_request_credentials(apify_token: str | None, anthropic_api_key: str | None):
+    """Install per-request key overrides; returns a reset token for the finally block.
+    Empty/whitespace values are treated as absent (no override for that key)."""
+    override = {
+        "apify_token": (apify_token or "").strip() or None,
+        "anthropic_api_key": (anthropic_api_key or "").strip() or None,
+    }
+    if not override["apify_token"] and not override["anthropic_api_key"]:
+        override = None  # nothing supplied -> pure operator/env resolution
+    return _request_credentials.set(override)
+
+
+def reset_request_credentials(token) -> None:
+    _request_credentials.reset(token)
+
+
+def _resolve_key(override_key: str, owner_value: str | None, shared: bool) -> str | None:
+    """Effective key = the request's own key if supplied, else the operator's env
+    key while sharing is on, else nothing (the honest 'bring your own key' path)."""
+    ov = _request_credentials.get()
+    if ov and ov.get(override_key):
+        return ov[override_key]
+    return owner_value if shared else None
+
+
+def request_override_present(override_key: str) -> bool:
+    """True when THIS request supplied its own value for override_key (used to label
+    the credit meter 'your key' vs 'shared key')."""
+    ov = _request_credentials.get()
+    return bool(ov and ov.get(override_key))
 
 
 def _env_int(name: str, default: int) -> int:
@@ -91,13 +136,48 @@ class Settings:
         default_factory=lambda: os.getenv("KOLLAB_LLM_RERANK", "1").strip().lower() not in ("0", "false", "no")
     )
 
+    # Share the operator's own keys as the fallback for visitors who haven't pasted
+    # their own (KOLLAB_SHARED_KEY=1, default). Flip to 0 to STOP spending the
+    # operator's credit — live runs then require the visitor's own key (seed/demo
+    # mode still works free). The one-line kill switch for "I'm running low".
+    shared_key: bool = field(
+        default_factory=lambda: os.getenv("KOLLAB_SHARED_KEY", "1").strip().lower() not in ("0", "false", "no")
+    )
+
     @property
     def apify_enabled(self) -> bool:
+        """Operator has an Apify token configured (env). Reported in /health."""
         return bool(self.apify_token)
 
     @property
     def llm_enabled(self) -> bool:
+        """Operator has an LLM key configured (env). Reported in /health."""
         return bool(self.anthropic_api_key or self.gemini_api_key)
+
+    # ── Effective keys: what THIS request actually runs on (request key > shared
+    #    operator key > nothing). The live paths all read these, never the raw env
+    #    fields, so a reviewer's pasted key transparently takes over.
+    @property
+    def effective_apify_token(self) -> str | None:
+        return _resolve_key("apify_token", self.apify_token, self.shared_key)
+
+    @property
+    def effective_anthropic_api_key(self) -> str | None:
+        return _resolve_key("anthropic_api_key", self.anthropic_api_key, self.shared_key)
+
+    @property
+    def effective_gemini_api_key(self) -> str | None:
+        # Gemini is the operator's env-only degradation fallback; withheld when
+        # sharing is off (no per-request Gemini override — scope is Claude/Apify).
+        return self.gemini_api_key if self.shared_key else None
+
+    @property
+    def effective_apify_enabled(self) -> bool:
+        return bool(self.effective_apify_token)
+
+    @property
+    def effective_llm_enabled(self) -> bool:
+        return bool(self.effective_anthropic_api_key or self.effective_gemini_api_key)
 
 
 def get_settings() -> Settings:

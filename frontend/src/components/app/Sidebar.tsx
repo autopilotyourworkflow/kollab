@@ -154,17 +154,19 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           </div>
         </nav>
 
-        {/* Footer — Settings/Help are honest placeholders, same treatment as Soon tools */}
+        {/* Footer — Settings is live (bring-your-own-key); Help is an honest placeholder */}
         <div className="border-t border-border px-3 py-3">
-          <div className="flex items-center gap-1 px-1 pb-3 opacity-50">
-            <div className="flex flex-1 cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-ink-500" title="Settings — coming soon">
+          <div className="flex items-center gap-1 px-1 pb-3">
+            <Link
+              to="/app/settings"
+              onClick={onClose}
+              className="flex flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-ink-700 transition-colors hover:bg-surface hover:text-brand"
+              title="Settings — bring your own API keys"
+            >
               <Settings size={15} />
-              <span className="text-[12px]">Settings</span>
-              <span className="rounded-full bg-panel px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-ink-500">
-                Soon
-              </span>
-            </div>
-            <div className="flex cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-ink-500" title="Help — coming soon">
+              <span className="text-[12px] font-medium">Settings</span>
+            </Link>
+            <div className="flex cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-ink-500 opacity-50" title="Help — coming soon">
               <LifeBuoy size={15} />
             </div>
           </div>

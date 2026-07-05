@@ -151,8 +151,8 @@ def extract_brand_dna(
     prompt = _PROMPT.format(url=url, text=text)
     notes: list[str] = []
     tiers: list[tuple[str, Callable[[str], str] | None]] = [
-        ("claude", claude_call or (claude_text if settings.anthropic_api_key else None)),
-        ("gemini", gemini_call or (gemini_text if settings.gemini_api_key else None)),
+        ("claude", claude_call or (claude_text if settings.effective_anthropic_api_key else None)),
+        ("gemini", gemini_call or (gemini_text if settings.effective_gemini_api_key else None)),
     ]
     for name, call in tiers:
         if call is None:
