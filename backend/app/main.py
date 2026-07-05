@@ -17,6 +17,7 @@ from app.matching.rerank import apply_llm_rerank
 from app.pipeline import build_shortlist
 from app.schemas import BrandDnaRequest, BrandDnaResponse, ClientBrief, ShortlistResponse
 from app.sources.apify import ApifyAdapter
+from app.sources.plans import public_payload, resolve_plan
 from app.sources.seed import SeedDatasetSource
 
 app = FastAPI(
@@ -37,7 +38,8 @@ app.add_middleware(
 )
 
 
-def _make_source():
+def _make_source(preset: str | None = None, creators: int | None = None,
+                 comments: int | None = None, cap_usd: float | None = None):
     settings = get_settings()
     if settings.source == "apify":
         if not settings.apify_enabled:
@@ -47,7 +49,19 @@ def _make_source():
                 detail="KOLLAB_SOURCE=apify but APIFY_TOKEN is not set. Provide the token "
                        "(see backend/.env.example) or unset KOLLAB_SOURCE for the seed dataset.",
             )
-        return ApifyAdapter(settings.apify_token, budget_usd=settings.run_budget_usd)
+        try:
+            plan = resolve_plan(preset, creators, comments)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        # The user's cap can never exceed the server operator's ceiling.
+        cap = min(cap_usd if cap_usd is not None else plan.cap_usd, settings.run_budget_usd)
+        return ApifyAdapter(
+            settings.apify_token, budget_usd=cap,
+            max_creators=plan.max_creators,
+            videos_per_creator=plan.videos_per_creator,
+            comments_per_creator=plan.comments_per_creator,
+            results_per_query=plan.results_per_query,
+        )
     return SeedDatasetSource()
 
 
@@ -89,10 +103,25 @@ def get_shortlist() -> ShortlistResponse:
 
 
 @app.post("/api/shortlist", response_model=ShortlistResponse)
-def post_shortlist(brief: ClientBrief) -> ShortlistResponse:
+def post_shortlist(
+    brief: ClientBrief,
+    preset: str | None = None,
+    creators: int | None = None,
+    comments: int | None = None,
+    cap_usd: float | None = None,
+) -> ShortlistResponse:
     """Run the pipeline for a supplied brief. In fixtures mode the candidate set is
-    the curated cohort; with a live source it sources against the brief."""
-    return _run_pipeline(_make_source(), brief=brief)
+    the curated cohort; with a live source it sources against the brief at the
+    requested run depth (?preset=scan|standard|deep, optional creators/comments
+    overrides, cap_usd never exceeding the server ceiling)."""
+    return _run_pipeline(_make_source(preset, creators, comments, cap_usd), brief=brief)
+
+
+@app.get("/api/run-plans")
+def run_plans() -> dict:
+    """Run-depth presets with computed cost estimates, default caps, and honest
+    quality notes — what each spend buys in evidence terms."""
+    return public_payload()
 
 
 @app.post("/api/brand-dna", response_model=BrandDnaResponse)

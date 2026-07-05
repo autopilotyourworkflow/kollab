@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { motion } from "motion/react"
-import { Check, Loader2, ShieldAlert, Gauge, ArrowRight, Sparkles, XCircle, RotateCcw } from "lucide-react"
+import { Check, Loader2, ShieldAlert, Gauge, ArrowRight, Sparkles, XCircle, RotateCcw, Layers } from "lucide-react"
 import { Button } from "../components/ui/Button"
 import { useShortlist, loadSavedBrief } from "../lib/api"
+import { loadRunPlan } from "../lib/runPlan"
 import { cn } from "../lib/cn"
 
 interface Step {
@@ -80,6 +81,7 @@ export function PipelineRun() {
   const [errored, setErrored] = useState(false)
   const finished = index >= steps.length
   const totalSeconds = data.cost.seconds
+  const plan = useMemo(loadRunPlan, []) // the depth chosen on the review step
 
   // advance steps
   useEffect(() => {
@@ -149,6 +151,16 @@ export function PipelineRun() {
             {elapsed.toFixed(1)}s
           </span>
         </div>
+      </div>
+
+      {/* the depth the AM chose on the review step — what a LIVE run would buy */}
+      <div className="mt-3 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-full bg-panel px-3 py-1.5 text-[12px] text-ink-700">
+        <Layers size={13} className="shrink-0 text-ink-500" />
+        <span>
+          Planned live depth: <span className="font-semibold text-ink">{plan.label}</span>
+          <span className="tnum"> · est ${plan.estUsd.toFixed(2)} · cap ${plan.capUsd.toFixed(2)}</span>
+        </span>
+        <span className="text-ink-400">— this demo run spends $0 (fixtures)</span>
       </div>
 
       <ol className="mt-9 rounded-2xl border border-border bg-white p-6 shadow-sm">

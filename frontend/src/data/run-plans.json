@@ -1,0 +1,44 @@
+{
+  "prices": {
+    "per1kResults": 1.7,
+    "per1kComments": 0.5
+  },
+  "searchQueries": 3,
+  "capHeadroom": 1.25,
+  "defaultPreset": "standard",
+  "presets": [
+    {
+      "key": "scan",
+      "label": "Scan",
+      "maxCreators": 10,
+      "videosPerCreator": 20,
+      "commentsPerCreator": 80,
+      "resultsPerQuery": 50,
+      "estUsd": 0.66,
+      "capUsd": 1.0,
+      "note": "Fast triage of a niche. Structural pod signals only — peer-cohort stats withhold below n=15, and the cross-creator reuse graph is thin at 10 creators."
+    },
+    {
+      "key": "standard",
+      "label": "Standard",
+      "maxCreators": 20,
+      "videosPerCreator": 20,
+      "commentsPerCreator": 120,
+      "resultsPerQuery": 100,
+      "estUsd": 1.71,
+      "capUsd": 2.25,
+      "note": "Working shortlist. Solid pod/burst/templated detection; per-tier cohort cells usually still sit below n=15, so outlier stats may withhold — honestly labeled when they do."
+    },
+    {
+      "key": "deep",
+      "label": "Deep",
+      "maxCreators": 40,
+      "videosPerCreator": 20,
+      "commentsPerCreator": 150,
+      "resultsPerQuery": 150,
+      "estUsd": 3.77,
+      "capUsd": 4.75,
+      "note": "Shortlist-grade. The dominant vertical×tier cell approaches n≥15 so peer-band statistics can fire, and the reuse graph is at its strongest. The depth used for client-facing runs."
+    }
+  ]
+}

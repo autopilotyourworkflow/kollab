@@ -142,7 +142,8 @@ the Pages demo + localhost.
 
 ## Testing
 
-88 tests (`backend/tests/`) on synthetic data + fake clients: every detector (pod / burst /
+95 tests (`backend/tests/`) on synthetic data + fake clients: run-depth plan math +
+frontend-parity enforcement, every detector (pod / burst /
 templated / thin / ER-outlier / view-to-follower / boosted / dormancy) in both firing and
 silent cases, the withhold paths (min-cohort AND min-video-sample), vetting dedup + ordering
 + lexicon corroboration, deterministic scoring, honest-rationale rules (withheld peer check,

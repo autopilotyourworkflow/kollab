@@ -18,6 +18,15 @@ import { Button } from "../components/ui/Button"
 import { ProvenanceChip } from "../components/ui/ProvenanceChip"
 import { client, brandDna } from "../data/kols"
 import { saveBrief } from "../lib/api"
+import {
+  defaultCap,
+  defaultPlan,
+  estimateCustom,
+  fromPreset,
+  plans,
+  saveRunPlan,
+  type RunPlanChoice,
+} from "../lib/runPlan"
 import { cn } from "../lib/cn"
 
 type Phase = "input" | "analyzing" | "review" | "error"
@@ -119,6 +128,30 @@ export function NewShortlist() {
   }
 
   const [live, setLive] = useState<LiveExtraction | null>(null)
+
+  // Run depth & budget: preset selection (or custom volumes) + editable hard cap.
+  const [planKey, setPlanKey] = useState(plans.defaultPreset)
+  const [customCreators, setCustomCreators] = useState(20)
+  const [customComments, setCustomComments] = useState(120)
+  const [capEdited, setCapEdited] = useState<number | null>(null)
+
+  const currentPlan = (): RunPlanChoice => {
+    if (planKey === "custom") {
+      const est = estimateCustom(customCreators, customComments)
+      return {
+        key: "custom", label: "Custom",
+        maxCreators: customCreators, commentsPerCreator: customComments,
+        estUsd: est, capUsd: capEdited ?? defaultCap(est),
+      }
+    }
+    const preset = plans.presets.find((p) => p.key === planKey)
+    const base = preset ? fromPreset(preset) : defaultPlan()
+    return capEdited !== null ? { ...base, capUsd: capEdited } : base
+  }
+  const plan = currentPlan()
+  const planNote = planKey === "custom"
+    ? "Custom depth — quality follows the volumes you choose; cohort stats withhold below n=15 regardless (the rule is not configurable)."
+    : plans.presets.find((p) => p.key === planKey)?.note ?? ""
 
   const analyze = async () => {
     const cleaned = url.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "")
@@ -438,14 +471,105 @@ export function NewShortlist() {
             </Field>
           </div>
 
+          {/* ── Run depth & budget ── */}
+          <div className="mt-5 rounded-2xl border border-border bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">
+                Run depth &amp; budget
+              </span>
+              <span className="text-[11px] text-ink-400">
+                priced from live actor rates · the hosted demo runs on fixtures
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4" role="radiogroup" aria-label="Run depth">
+              {[...plans.presets, null].map((p) => {
+                const key = p?.key ?? "custom"
+                const selected = planKey === key
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => {
+                      setPlanKey(key)
+                      setCapEdited(null) // new depth -> recompute the default cap
+                    }}
+                    className={cn(
+                      "rounded-xl border p-3 text-left transition-colors duration-200",
+                      selected
+                        ? "border-brand-300 bg-brand-50 ring-1 ring-brand-300"
+                        : "border-border bg-white hover:border-brand-300",
+                    )}
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[13px] font-semibold text-ink">{p?.label ?? "Custom"}</span>
+                      <span className="tnum text-[13px] font-bold text-brand">
+                        ≈${p ? p.estUsd.toFixed(2) : estimateCustom(customCreators, customComments).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-ink-500">
+                      {p ? `${p.maxCreators} creators · ${p.commentsPerCreator} comments each` : "set your own volumes"}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+
+            {planKey === "custom" && (
+              <div className="mt-3 flex flex-wrap items-end gap-4">
+                <label className="text-[12px] font-medium text-ink-700">
+                  Creators
+                  <input
+                    type="number" min={3} max={100} value={customCreators}
+                    onChange={(e) => {
+                      setCustomCreators(Math.max(3, Math.min(100, Number(e.target.value) || 3)))
+                      setCapEdited(null)
+                    }}
+                    className="mt-1 block w-24 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink focus:border-brand-300 focus:bg-white"
+                  />
+                </label>
+                <label className="text-[12px] font-medium text-ink-700">
+                  Comments / creator
+                  <input
+                    type="number" min={20} max={500} step={10} value={customComments}
+                    onChange={(e) => {
+                      setCustomComments(Math.max(20, Math.min(500, Number(e.target.value) || 20)))
+                      setCapEdited(null)
+                    }}
+                    className="mt-1 block w-28 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink focus:border-brand-300 focus:bg-white"
+                  />
+                </label>
+              </div>
+            )}
+
+            <p className="mt-3 text-[12px] leading-relaxed text-ink-500">{planNote}</p>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3 text-[12px] text-ink-700">
+              <span className="font-medium">Hard cap</span>
+              <span className="tnum">$</span>
+              <input
+                type="number" min={plan.estUsd} step={0.25} value={plan.capUsd}
+                onChange={(e) => setCapEdited(Math.max(plan.estUsd, Number(e.target.value) || plan.estUsd))}
+                aria-label="Hard budget cap in USD"
+                className="w-20 rounded-lg border border-border bg-surface px-2 py-1 text-[13px] tnum text-ink focus:border-brand-300 focus:bg-white"
+              />
+              <span className="text-ink-500">
+                — the sourcing loop stops <em>before</em> crossing it: a too-tight cap yields a labeled partial
+                pull, never a surprise bill.
+              </span>
+            </div>
+          </div>
+
           <div className="mt-5 flex items-center justify-between">
             <Button variant="ghost" onClick={() => setPhase("input")} leadingIcon={<ArrowLeft size={16} />}>
               Re-analyze
             </Button>
             <Button
               onClick={() => {
-                // persist the AM's edits — the shortlist and run screens read them back
+                // persist the AM's edits + chosen run depth — the run screen reads them back
                 saveBrief({ audience, tone, region, pillars })
+                saveRunPlan(plan)
                 navigate("/app/run")
               }}
               trailingIcon={<ArrowRight size={16} />}
