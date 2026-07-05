@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Secrets (deploy tokens, VITE_API_URL overrides) — never committed
+.env
+.env.*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
