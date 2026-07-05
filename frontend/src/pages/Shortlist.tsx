@@ -219,7 +219,13 @@ export function Shortlist() {
           </div>
         </div>
 
-        {/* accumulation feedback */}
+        {/* live-sourcing progress + accumulation feedback */}
+        {adding && (
+          <p className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-500">
+            <Loader2 size={12} className="animate-spin" />
+            Sourcing &amp; vetting live creators — a real run can take a minute or two.
+          </p>
+        )}
         {justAdded !== null && (
           <motion.p
             initial={{ opacity: 0, y: -4 }}

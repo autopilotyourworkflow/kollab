@@ -3,11 +3,16 @@
 The deployed frontend can point at this to replace its bundled fixtures with a live
 call; both render the identical ShortlistResponse contract. Runs credential-free on
 SeedDatasetSource. CORS is open to the Pages demo + localhost dev.
+
+Live sourcing is slow (minutes), so it runs asynchronously: POST /api/runs starts a
+background job whose state lives in the database, and the frontend polls
+GET /api/runs/{id}. POST /api/shortlist keeps the synchronous path for fixtures and
+direct/API use.
 """
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,15 +25,11 @@ from app.config import (
     set_request_credentials,
 )
 from app.credit import fetch_apify_credit
-from app.db import database_url, db_status
+from app.db import database_url, db_status, init_db
 from app.ingest import extract_brand_dna
-from app.matching.rerank import apply_llm_rerank
-from app.pipeline import build_shortlist
 from app.schemas import BrandDnaRequest, BrandDnaResponse, ClientBrief, ShortlistResponse
-from app.sources.apify import ApifyAdapter
-from app.sources.plans import public_payload, resolve_plan
-from app.sources.seed import SeedDatasetSource
-from app.store import known_handles, record_run
+from app.service import BadRequest, LiveRunError, run_shortlist
+from app.sources.plans import public_payload
 
 
 @contextmanager
@@ -47,10 +48,33 @@ def _request_keys(x_apify_token: str | None, x_anthropic_key: str | None):
         reset_request_credentials(token)
 
 
+def _serve(run):
+    """Map the service's typed errors to HTTP codes (400 bad input, 503 live-path
+    precondition) so every endpoint answers honestly, never an opaque 500."""
+    try:
+        return run()
+    except BadRequest as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except LiveRunError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Create the runs table when a database is configured (idempotent). A bad/absent
+    # DATABASE_URL must never stop the seed demo from serving, so this is best-effort.
+    try:
+        init_db()
+    except Exception:
+        pass
+    yield
+
+
 app = FastAPI(
     title="Kollab API",
     version=__version__,
     description="Brand-fit + fraud-vetting judgment layer for Thai TikTok KOLs.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -67,36 +91,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-def _make_source(preset: str | None = None, creators: int | None = None,
-                 comments: int | None = None, cap_usd: float | None = None):
-    settings = get_settings()
-    if settings.source == "apify":
-        if not settings.effective_apify_enabled:
-            # Honest fail-fast: never a silent fallback that pretends to be live.
-            # With sharing off (or no operator key), the visitor must bring their own.
-            raise HTTPException(
-                status_code=503,
-                detail="No Apify credit available for this run. Add your own Apify key in "
-                       "Settings (it stays in your browser), or the operator can set "
-                       "APIFY_TOKEN / KOLLAB_SHARED_KEY=1. The demo dataset always runs free.",
-            )
-        try:
-            plan = resolve_plan(preset, creators, comments)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        # The user's cap can never exceed the server operator's ceiling.
-        cap = min(cap_usd if cap_usd is not None else plan.cap_usd, settings.run_budget_usd)
-        return ApifyAdapter(
-            settings.effective_apify_token, budget_usd=cap,
-            max_creators=plan.max_creators,
-            videos_per_creator=plan.videos_per_creator,
-            comments_per_creator=plan.comments_per_creator,
-            results_per_query=plan.results_per_query,
-            region=settings.region,
-        )
-    return SeedDatasetSource()
 
 
 @app.get("/health")
@@ -158,26 +152,10 @@ def credit(
         }
 
 
-def _run_pipeline(source, brief: ClientBrief | None = None) -> ShortlistResponse:
-    try:
-        response = build_shortlist(source, brief=brief, min_n=get_settings().min_cohort_n)
-    except RuntimeError as e:
-        # Live-path preconditions (missing token/client, busted budget) surface as
-        # an honest 503 with the reason — never an opaque 500 or a fake result.
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    except ValueError as e:
-        # Live sources carry no default brief: GET has nothing to run against.
-        raise HTTPException(
-            status_code=400,
-            detail=f"{e} POST /api/shortlist with a ClientBrief to run a live source.",
-        ) from e
-    return apply_llm_rerank(response)
-
-
 @app.get("/api/shortlist", response_model=ShortlistResponse)
 def get_shortlist() -> ShortlistResponse:
     """The default demo shortlist (Glow Lab) on curated fixtures."""
-    return _run_pipeline(_make_source())
+    return _serve(lambda: run_shortlist(None))
 
 
 @app.post("/api/shortlist", response_model=ShortlistResponse)
@@ -192,29 +170,60 @@ def post_shortlist(
     x_apify_token: str | None = Header(default=None),
     x_anthropic_key: str | None = Header(default=None),
 ) -> ShortlistResponse:
-    """Run the pipeline for a supplied brief. In fixtures mode the candidate set is
-    the curated cohort; with a live source it sources against the brief at the
-    requested run depth (?preset=scan|standard|deep, optional creators/comments
-    overrides, cap_usd never exceeding the server ceiling). A visitor's own Apify /
-    Claude key (from Settings) rides the X-Apify-Token / X-Anthropic-Key headers and
-    runs this call on their credit instead of the operator's.
-
-    Expand runs never buy the same data twice: `?expand=1` skips every creator
-    this brand has pulled before (run-history store) and `?exclude=@handle` adds
-    explicit skips — their slots fill with NEW creators, and `excludedKnown`
-    reports how many were deduplicated."""
+    """Synchronously run the pipeline for a brief. Fixtures mode returns the curated
+    cohort; a live source blocks on the scrape (use POST /api/runs for the non-blocking
+    path). `?preset=scan|standard|deep`, optional creators/comments overrides, cap_usd
+    never exceeding the server ceiling. A visitor's own key rides the
+    X-Apify-Token / X-Anthropic-Key headers. `?expand=1` skips creators this brand
+    already holds; `?exclude=@handle` adds explicit skips; `excludedKnown` reports the
+    dedup count."""
     with _request_keys(x_apify_token, x_anthropic_key):
-        source = _make_source(preset, creators, comments, cap_usd)
-        if isinstance(source, ApifyAdapter):
-            skip = set(exclude)
-            if expand:
-                skip |= known_handles(brief.brand)
-            source.exclude_handles = {h.strip().lstrip("@").lower() for h in skip}
-        response = _run_pipeline(source, brief=brief)
-        if isinstance(source, ApifyAdapter):
-            record_run(brief.brand, [k.handle for k in response.kols])
-            response.excluded_known = int(source.last_run.get("excluded_known", 0))
-        return response
+        return _serve(lambda: run_shortlist(
+            brief, preset=preset, creators=creators, comments=comments,
+            cap_usd=cap_usd, expand=expand, exclude=exclude,
+        ))
+
+
+@app.post("/api/runs")
+def start_run_endpoint(
+    brief: ClientBrief,
+    preset: str = "standard",
+    expand: bool = False,
+    exclude: list[str] = Query(default=[]),
+    x_apify_token: str | None = Header(default=None),
+    x_anthropic_key: str | None = Header(default=None),
+) -> dict:
+    """Start an async sourcing run; return its id immediately (a real scrape takes
+    minutes — too long to hold the request open). Poll GET /api/runs/{id} for the
+    result. Requires a database (run state lives there); without one, use
+    POST /api/shortlist. The visitor's own key (if supplied) is captured here and used
+    for the whole run."""
+    if not database_url():
+        raise HTTPException(
+            status_code=503,
+            detail="Async runs need a database — set DATABASE_URL (Neon). "
+                   "Without it, POST /api/shortlist runs synchronously.",
+        )
+    with _request_keys(x_apify_token, x_anthropic_key):
+        s = get_settings()
+        apify = s.effective_apify_token
+        anthropic = s.effective_anthropic_api_key
+    from app.runs import start_run
+
+    run_id = start_run(brief.model_dump(by_alias=True), preset, expand, exclude, apify, anthropic)
+    return {"id": run_id, "status": "queued"}
+
+
+@app.get("/api/runs/{run_id}")
+def get_run_endpoint(run_id: str) -> dict:
+    """Poll a run: {status: queued|running|done|error, result?, error?}. `result` is
+    the camelCase ShortlistResponse the frontend merges once status is done."""
+    from app.runs import get_run
+
+    run = get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return run
 
 
 @app.get("/api/run-plans")
@@ -247,5 +256,5 @@ def root() -> dict:
         "name": "Kollab API",
         "tagline": "Not a scraper, not a database — the brand-fit and vetting brain.",
         "docs": "/docs",
-        "endpoints": ["/health", "/api/shortlist"],
+        "endpoints": ["/health", "/api/shortlist", "/api/runs"],
     }

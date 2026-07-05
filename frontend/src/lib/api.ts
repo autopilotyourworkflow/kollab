@@ -89,29 +89,38 @@ export function useShortlist(): ShortlistData {
 }
 
 /** Live expand-run: pull MORE creators for a brief the shortlist already has, on the
-    backend that never re-buys held data (POST /api/shortlist?expand=1). Returns the
-    fresh Kol[] or null when there's no backend / it fails — the caller then falls
-    back to the demo expansion pool so accumulation always works. */
+    backend that never re-buys held data. A real scrape takes minutes, so the backend
+    runs it asynchronously — we START it (POST /api/runs) and POLL (GET /api/runs/{id})
+    until it finishes. Returns the fresh Kol[], or null when there's no backend / it
+    fails / times out — the caller then falls back to the demo pool so accumulation
+    always works. */
 export async function expandShortlist(brief: ClientBrief, preset = "standard"): Promise<Kol[] | null> {
   const base = (import.meta.env.VITE_API_URL as string | undefined) ?? ""
   if (!base) return null
   try {
     const { authHeaders } = await import("./credentials")
-    const ctrl = new AbortController()
-    // A real Apify expand-run (search + comment sampling) takes 1–3 min, and a
-    // cold Render free instance adds startup time — so give it room, don't cut it
-    // off at 30s and fall back to the demo pool while a real run is still working.
-    const t = window.setTimeout(() => ctrl.abort(), 180_000)
-    const res = await fetch(`${base}/api/shortlist?expand=1&preset=${encodeURIComponent(preset)}`, {
+    // 1) start the async run — returns immediately with an id
+    const startRes = await fetch(`${base}/api/runs?preset=${encodeURIComponent(preset)}&expand=1`, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify(brief),
-      signal: ctrl.signal,
     })
-    window.clearTimeout(t)
-    if (!res.ok) return null
-    const data = (await res.json()) as { kols?: Kol[] }
-    return Array.isArray(data.kols) ? data.kols : null
+    if (!startRes.ok) return null
+    const started = (await startRes.json()) as { id?: string }
+    if (!started.id) return null
+
+    // 2) poll until the background job finishes (search + vetting is 1–3 min); the
+    //    polling itself keeps the free Render instance awake through the run.
+    const deadline = Date.now() + 300_000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3500))
+      const pollRes = await fetch(`${base}/api/runs/${started.id}`, { headers: authHeaders() })
+      if (!pollRes.ok) continue
+      const job = (await pollRes.json()) as { status?: string; result?: { kols?: Kol[] } }
+      if (job.status === "done") return job.result?.kols ?? []
+      if (job.status === "error") return null
+    }
+    return null
   } catch {
     return null
   }

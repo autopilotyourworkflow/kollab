@@ -10,13 +10,13 @@
     {
       "key": "scan",
       "label": "Scan",
-      "maxCreators": 10,
+      "maxCreators": 8,
       "videosPerCreator": 20,
-      "commentsPerCreator": 80,
-      "resultsPerQuery": 50,
-      "estUsd": 0.66,
-      "capUsd": 1.0,
-      "note": "Fast triage of a niche. Structural pod signals only — peer-cohort stats withhold below n=15, and the cross-creator reuse graph is thin at 10 creators."
+      "commentsPerCreator": 50,
+      "resultsPerQuery": 15,
+      "estUsd": 0.28,
+      "capUsd": 0.5,
+      "note": "Fast triage of a niche. Structural pod signals only \u2014 peer-cohort stats withhold below n=15, and the cross-creator reuse graph is thin at 8 creators."
     },
     {
       "key": "standard",
@@ -24,10 +24,10 @@
       "maxCreators": 20,
       "videosPerCreator": 20,
       "commentsPerCreator": 120,
-      "resultsPerQuery": 100,
-      "estUsd": 1.71,
-      "capUsd": 2.25,
-      "note": "Working shortlist. Solid pod/burst/templated detection; per-tier cohort cells usually still sit below n=15, so outlier stats may withhold — honestly labeled when they do."
+      "resultsPerQuery": 25,
+      "estUsd": 1.33,
+      "capUsd": 1.75,
+      "note": "Working shortlist. Solid pod/burst/templated detection; per-tier cohort cells usually still sit below n=15, so outlier stats may withhold \u2014 honestly labeled when they do."
     },
     {
       "key": "deep",
@@ -35,10 +35,10 @@
       "maxCreators": 40,
       "videosPerCreator": 20,
       "commentsPerCreator": 150,
-      "resultsPerQuery": 150,
-      "estUsd": 3.77,
-      "capUsd": 4.75,
-      "note": "Shortlist-grade. The dominant vertical×tier cell approaches n≥15 so peer-band statistics can fire, and the reuse graph is at its strongest. The depth used for client-facing runs."
+      "resultsPerQuery": 40,
+      "estUsd": 3.2,
+      "capUsd": 4.0,
+      "note": "Shortlist-grade. The dominant vertical\u00d7tier cell approaches n\u226515 so peer-band statistics can fire, and the reuse graph is at its strongest. The depth used for client-facing runs."
     }
   ]
 }

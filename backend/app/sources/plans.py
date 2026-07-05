@@ -53,24 +53,29 @@ class RunPlan:
         return math.ceil(self.est_usd * CAP_HEADROOM * 4) / 4
 
 
+# results_per_query is deliberately modest: TikTok search-scraping is the slow,
+# costly part of a run (each result is billed and the actor scrapes them serially),
+# and grouping a few dozen on-query videos by author already yields more distinct
+# creators than a preset selects. Bigger search pages buy diminishing candidates
+# for a lot more time and money.
 PRESETS: dict[str, RunPlan] = {
     "scan": RunPlan(
-        key="scan", label="Scan", max_creators=10, videos_per_creator=20,
-        comments_per_creator=80, results_per_query=50,
+        key="scan", label="Scan", max_creators=8, videos_per_creator=20,
+        comments_per_creator=50, results_per_query=15,
         note=("Fast triage of a niche. Structural pod signals only — peer-cohort "
               "stats withhold below n=15, and the cross-creator reuse graph is "
-              "thin at 10 creators."),
+              "thin at 8 creators."),
     ),
     "standard": RunPlan(
         key="standard", label="Standard", max_creators=20, videos_per_creator=20,
-        comments_per_creator=120, results_per_query=100,
+        comments_per_creator=120, results_per_query=25,
         note=("Working shortlist. Solid pod/burst/templated detection; per-tier "
               "cohort cells usually still sit below n=15, so outlier stats may "
               "withhold — honestly labeled when they do."),
     ),
     "deep": RunPlan(
         key="deep", label="Deep", max_creators=40, videos_per_creator=20,
-        comments_per_creator=150, results_per_query=150,
+        comments_per_creator=150, results_per_query=40,
         note=("Shortlist-grade. The dominant vertical×tier cell approaches n≥15 "
               "so peer-band statistics can fire, and the reuse graph is at its "
               "strongest. The depth used for client-facing runs."),
