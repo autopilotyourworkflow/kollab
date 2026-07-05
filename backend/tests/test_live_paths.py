@@ -131,6 +131,28 @@ def test_dataset_id_handles_dict_and_typed_run():
     assert _dataset_id(None) is None
 
 
+def test_region_sets_proxy_country_on_search():
+    fake = FakeApifyClient({
+        TIKTOK_SCRAPER_ACTOR: _search_response,
+        TIKTOK_COMMENTS_ACTOR: lambda run_input: [_comment_item(i) for i in range(10)],
+    })
+    ApifyAdapter(client=fake, budget_usd=5.0, results_per_query=50,
+                 region="TH").fetch_candidates(BRIEF)
+    search_call = next(c for c in fake.calls if c[0] == TIKTOK_SCRAPER_ACTOR)
+    assert search_call[1]["proxyCountryCode"] == "TH"
+
+
+def test_global_region_omits_proxy_country():
+    fake = FakeApifyClient({
+        TIKTOK_SCRAPER_ACTOR: _search_response,
+        TIKTOK_COMMENTS_ACTOR: lambda run_input: [_comment_item(i) for i in range(10)],
+    })
+    ApifyAdapter(client=fake, budget_usd=5.0, results_per_query=50,
+                 region="none").fetch_candidates(BRIEF)
+    search_call = next(c for c in fake.calls if c[0] == TIKTOK_SCRAPER_ACTOR)
+    assert "proxyCountryCode" not in search_call[1]
+
+
 def test_apify_loop_stops_before_crossing_the_cap():
     fake = FakeApifyClient({
         TIKTOK_SCRAPER_ACTOR: _search_response,

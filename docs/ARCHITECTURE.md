@@ -74,10 +74,13 @@ lists each signal and its grounding.
   `BudgetMeter` that pre-checks every fetch and stops *before* the projected spend crosses
   the cap (`KOLLAB_RUN_BUDGET_USD`, default $5) — a partial-but-honest pull, never a
   surprise bill. The client is injectable, so the whole loop is tested against a fake;
-  the first run against the real actors is a calibration run. Commenter-profile second-pass
-  enrichment is deliberately not pulled (cost) — without it the thin-commenter detector
-  withholds rather than guesses. Missing preconditions (no token, no `apify-client`)
-  surface as an honest `503` with the reason. Clearly labeled prototyping/public-data only.
+  the first run against the real actors is a calibration run. Sourcing is region-targeted via
+  the scraper's `proxyCountryCode` (`KOLLAB_REGION`, default `TH`) so search returns Thai
+  creators — verified live (Thai queries + TH proxy return Thai skincare creators where
+  English queries returned US ones). Commenter-profile second-pass enrichment is deliberately
+  not pulled (cost) — without it the thin-commenter detector withholds rather than guesses.
+  Missing preconditions (no token, no `apify-client`) surface as an honest `503` with the
+  reason. Clearly labeled prototyping/public-data only.
 
 ### `app/matching/`
 - **`score.py`** — deterministic `build_factors` (topic / authenticity / recency / audience)

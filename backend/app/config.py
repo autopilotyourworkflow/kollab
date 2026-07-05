@@ -72,6 +72,11 @@ class Settings:
     # the badge reads "insufficient baseline — signal withheld" (see fraud.cohort).
     min_cohort_n: int = field(default_factory=lambda: _env_int("KOLLAB_MIN_COHORT_N", 15))
 
+    # Sourcing region (ISO country) — routes the TikTok scraper through this
+    # country's proxy so search returns local creators. Default Thailand (the
+    # target market); "None"/"" scrapes globally.
+    region: str = field(default_factory=lambda: os.getenv("KOLLAB_REGION", "TH"))
+
     # Hard USD cap for one live Apify sourcing run. The adapter stops fetching
     # before the projected spend crosses this line (never mid-actor surprises).
     run_budget_usd: float = field(default_factory=lambda: _env_float("KOLLAB_RUN_BUDGET_USD", 5.0))

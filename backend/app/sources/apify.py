@@ -187,7 +187,7 @@ class ApifyAdapter(KOLSource):
     def __init__(self, token: str | None = None, budget_usd: float = 5.0,
                  client=None, max_creators: int = 12, videos_per_creator: int = 20,
                  comments_per_creator: int = 120, results_per_query: int = 100,
-                 exclude_handles: set[str] | None = None):
+                 exclude_handles: set[str] | None = None, region: str = "TH"):
         self.token = token
         self.budget = BudgetMeter(budget_usd)
         self._client = client
@@ -195,6 +195,9 @@ class ApifyAdapter(KOLSource):
         self.videos_per_creator = videos_per_creator
         self.comments_per_creator = comments_per_creator
         self.results_per_query = results_per_query
+        # ISO country routed via the scraper's proxy so search returns local
+        # creators (default Thailand). "None"/"" -> global.
+        self.region = (region or "").strip().upper()
         # Expand-run dedup: creators the brand already holds. They are skipped
         # BEFORE any comment spend and their slots fill with NEW creators —
         # a re-run buys new evidence, never the same data twice. (Their video
@@ -245,10 +248,13 @@ class ApifyAdapter(KOLSource):
                 f"${self.budget.cap_usd:.2f} run budget — raise KOLLAB_RUN_BUDGET_USD "
                 f"or narrow the brief."
             )
-        video_items = self._run_actor(client, TIKTOK_SCRAPER_ACTOR, {
+        search_input: dict = {
             "searchQueries": queries,
             "resultsPerPage": self.results_per_query,
-        })
+        }
+        if self.region and self.region not in ("NONE", "GLOBAL"):
+            search_input["proxyCountryCode"] = self.region  # Thai proxy -> Thai results
+        video_items = self._run_actor(client, TIKTOK_SCRAPER_ACTOR, search_input)
         self.budget.results += len(video_items)
 
         # 2) group by author; most on-query videos first (relevance proxy)
@@ -299,6 +305,7 @@ class ApifyAdapter(KOLSource):
 
         self.last_run = {
             "queries": queries,
+            "region": self.region or "global",
             "creators": len(kols),
             "excluded_known": excluded_known,
             "results": self.budget.results,

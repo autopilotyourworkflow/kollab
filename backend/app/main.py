@@ -62,6 +62,7 @@ def _make_source(preset: str | None = None, creators: int | None = None,
             videos_per_creator=plan.videos_per_creator,
             comments_per_creator=plan.comments_per_creator,
             results_per_query=plan.results_per_query,
+            region=settings.region,
         )
     return SeedDatasetSource()
 
