@@ -15,9 +15,16 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27"]
-# Live paths (Apify sourcing, Claude/Gemini Brand DNA + rerank, site fetch).
-# The credential-free demo needs none of these; all imports are lazy.
-live = ["apify-client>=1.7", "anthropic>=0.40", "httpx>=0.27"]
+# Live paths (Apify sourcing, Claude/Gemini Brand DNA + rerank, site fetch) plus
+# the durable Postgres store (SQLAlchemy + psycopg3). The credential-free demo
+# needs none of these; all imports are lazy.
+live = [
+    "apify-client>=1.7",
+    "anthropic>=0.40",
+    "httpx>=0.27",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+]
 
 # Ship only the app package (a flat layout with tests/ + eval/ alongside would
 # otherwise make setuptools auto-discovery ambiguous and fail the build).

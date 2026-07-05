@@ -98,7 +98,10 @@ export async function expandShortlist(brief: ClientBrief, preset = "standard"): 
   try {
     const { authHeaders } = await import("./credentials")
     const ctrl = new AbortController()
-    const t = window.setTimeout(() => ctrl.abort(), 30_000)
+    // A real Apify expand-run (search + comment sampling) takes 1–3 min, and a
+    // cold Render free instance adds startup time — so give it room, don't cut it
+    // off at 30s and fall back to the demo pool while a real run is still working.
+    const t = window.setTimeout(() => ctrl.abort(), 180_000)
     const res = await fetch(`${base}/api/shortlist?expand=1&preset=${encodeURIComponent(preset)}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },

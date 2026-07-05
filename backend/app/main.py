@@ -20,6 +20,7 @@ from app.config import (
     set_request_credentials,
 )
 from app.credit import fetch_apify_credit
+from app.db import database_url, db_status
 from app.ingest import extract_brand_dna
 from app.matching.rerank import apply_llm_rerank
 from app.pipeline import build_shortlist
@@ -112,7 +113,17 @@ def health() -> dict:
         "run_budget_usd": s.run_budget_usd,
         # Whether the operator shares their own keys as the fallback (kill switch).
         "shared_key": s.shared_key,
+        # Cheap flag (no DB round-trip); /api/db-status does the live check.
+        "db_configured": bool(database_url()),
     }
+
+
+@app.get("/api/db-status")
+def db_status_endpoint() -> dict:
+    """Live database connectivity — runs a real SELECT 1. A green result confirms the
+    DATABASE_URL (Neon) credentials, network, and SSL all work from this host. Never
+    leaks the URL/password."""
+    return db_status()
 
 
 @app.get("/api/credit")
