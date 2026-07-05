@@ -7,6 +7,23 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+# Load backend/.env into the environment on import (local dev convenience). Does
+# nothing on hosts that inject real env vars (no .env present, e.g. Render), and
+# never overrides an already-set variable. Optional dep: the credential-free
+# minimal install without python-dotenv simply skips it.
+def _load_local_dotenv() -> None:
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    if env_path.exists():
+        load_dotenv(env_path, override=False)
+
+
+_load_local_dotenv()
 
 # Apify actor prices, verified in the pre-flight spike (2026-07-02). Used both to
 # project the cost meter and to enforce the live-run budget cap.
