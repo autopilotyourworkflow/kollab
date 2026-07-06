@@ -11,7 +11,7 @@ from app.config import PRICE_PER_1K_COMMENTS, PRICE_PER_1K_RESULTS
 from app.fraud.brand_safety import brand_safety_gate
 from app.fraud.cohort import engagement_rate, median_views
 from app.fraud.graph import get_graph_store, remember_edges
-from app.fraud.vet import _reference_now, vet_cohort
+from app.fraud.vet import _reference_now, to_checks, vet_cohort
 from app.matching.score import build_factors, fit_score
 from app.raw import RawKOL, parse_iso
 from app.schemas import (
@@ -121,6 +121,7 @@ def build_shortlist(
             why_th=why_th,
             est_rate_thb=None,  # only with >=2 cited Thai rate sources (locked scope)
             hitl=pres.hitl,
+            checks=to_checks(vet.raw_signals),  # full ledger for the internal report
         ))
 
     kols.sort(key=lambda k: k.fit_score, reverse=True)

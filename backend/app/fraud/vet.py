@@ -29,9 +29,42 @@ from app.fraud.signals import (
     view_to_follower_collapse,
 )
 from app.raw import RawKOL, parse_iso
-from app.schemas import FraudSignal, Risk
+from app.schemas import FraudSignal, Risk, VetCheck
 
 _LEVEL_RANK = {"clear": 0, "medium": 1, "high": 2}
+
+# Stable human labels for the full vetting ledger (the internal report shows every
+# detector that ran, so each needs a label even when it stayed clear/withheld).
+CHECK_LABELS = {
+    "commenter_reuse": "Cross-creator commenter reuse",
+    "comment_burst": "Comment-burst timing",
+    "duplicate_text": "Templated comment text",
+    "thin_commenters": "Thin commenter profiles",
+    "view_to_follower": "View-to-follower collapse",
+    "boosted_post": "Self-baseline view spike",
+    "er_outlier": "Engagement vs peer cohort",
+    "dormancy": "Cadence / dormancy",
+}
+
+
+def to_checks(raw_signals: list[SignalResult]) -> list[VetCheck]:
+    """Serialize the FULL vetting ledger for the internal report: every detector that
+    ran, whether it fired, stayed clear, or was WITHHELD (min-cohort rule). Surfacing the
+    withheld checks is the honesty payload — it shows what Kollab could NOT judge, and why."""
+    checks: list[VetCheck] = []
+    for r in raw_signals:
+        status = "withheld" if r.withheld else ("fired" if r.fired else "clear")
+        detail = r.detail or ("Signal withheld — insufficient baseline."
+                              if r.withheld else "No signal — checked and clear.")
+        checks.append(VetCheck(
+            name=r.name,
+            label=CHECK_LABELS.get(r.name, r.label or r.name),
+            status=status,
+            level=r.level,
+            detail=detail,
+            measured_against=r.measured_against,
+        ))
+    return checks
 
 # Fixed badge order (structural first, then bought/thin, then boost/stats).
 _BADGE_ORDER = [

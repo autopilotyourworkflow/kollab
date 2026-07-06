@@ -44,6 +44,19 @@ class Risk(CamelModel):
     signals: list[FraudSignal] = []
 
 
+class VetCheck(CamelModel):
+    """One line of the full vetting ledger for the internal report: every detector that
+    ran, whether it fired, stayed clear, or was WITHHELD (min-cohort rule) — so the
+    report shows exactly what Kollab could and could NOT judge, and why."""
+
+    name: str  # internal id, e.g. "commenter_reuse"
+    label: str  # human label, e.g. "Cross-creator commenter reuse"
+    status: Literal["fired", "clear", "withheld"]
+    level: RiskLevel
+    detail: str
+    measured_against: str
+
+
 class MatchFactor(CamelModel):
     key: FactorKey
     label: str
@@ -93,6 +106,8 @@ class Kol(CamelModel):
     # Only set when grounded in >=2 cited Thai rate sources; otherwise null.
     est_rate_thb: RateBand | None = None
     hitl: HitlStatus = "pending"
+    # Full vetting ledger (every check + withheld ones) for the internal report.
+    checks: list[VetCheck] = []
 
 
 class ClientBrief(CamelModel):
