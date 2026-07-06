@@ -149,16 +149,30 @@ def vet_cohort(
     corpus: list[RawKOL] | None = None,
     now: datetime | None = None,
     min_n: int = 15,
+    graph_store=None,
 ) -> dict[str, VetResult]:
     """Vet each candidate against cohort stats + a shared-commenter graph.
 
     `corpus` is the wider creator set the reuse graph is built from (production:
     the whole licensed feed; demo: cohort + pod-decoy creators). Defaults to the
     candidates themselves.
+
+    `graph_store` (optional) is the persistent cross-run commenter graph
+    (app.fraud.graph). When supplied it UNIONS each commenter's accumulated historical
+    creators into the in-run index BEFORE the reuse detector runs — so a pod that only
+    touched a couple of this run's creators but hits many across history is caught. The
+    detector's own gates (REUSE_MIN_CREATORS / POD_MIN_ACCOUNTS / POD_MIN_SHARE + the
+    n>=15 cohort withhold) are unchanged, so history can only raise recall on a real
+    pattern, never manufacture a pod. None -> in-run behavior, byte-identical to before.
     """
     corpus = corpus or candidates
     cohorts = build_cohorts(corpus, min_n=min_n)
     commenter_index = build_commenter_index(corpus)
+    if graph_store is not None:
+        try:
+            graph_store.augment(commenter_index)
+        except Exception:
+            pass  # a graph hiccup must never weaken or block vetting
     ref_now = now or _reference_now(corpus)
 
     out: dict[str, VetResult] = {}

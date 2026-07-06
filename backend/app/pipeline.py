@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from app.config import PRICE_PER_1K_COMMENTS, PRICE_PER_1K_RESULTS
 from app.fraud.cohort import engagement_rate, median_views
+from app.fraud.graph import get_graph_store, remember_edges
 from app.fraud.vet import _reference_now, vet_cohort
 from app.matching.score import build_factors, fit_score
 from app.raw import RawKOL, parse_iso
@@ -79,7 +80,12 @@ def build_shortlist(
     # Prefer the dataset's own as-of date (deterministic) when the source provides
     # one; otherwise infer "now" from the most recent activity in the corpus.
     now = getattr(source, "as_of", None) or _reference_now(corpus)
-    vet_map = vet_cohort(candidates, corpus, now=now, min_n=min_n)
+    # Persistent cross-run commenter graph (the fraud-recall moat): vet against the
+    # accumulated history, then record this run's edges so the next run knows more.
+    # Both calls are best-effort and no-op without a store, so the seed path is
+    # byte-identical and a DB hiccup never blocks vetting.
+    graph_store = get_graph_store()
+    vet_map = vet_cohort(candidates, corpus, now=now, min_n=min_n, graph_store=graph_store)
 
     kols: list[Kol] = []
     for kol in candidates:
@@ -117,6 +123,10 @@ def build_shortlist(
     recommended = sum(1 for k in kols if k.risk.level == "clear" and k.fit_score >= 70)
     flagged = sum(1 for k in kols if k.risk.level != "clear")
     screened = len(candidates) + len(extra)
+
+    # Record this run's commenter->creator edges so the next run knows more (best-effort,
+    # once per identical corpus per process — the moat grows without slowing the demo).
+    remember_edges(corpus, source=source.name)
 
     return ShortlistResponse(
         brief=brief,

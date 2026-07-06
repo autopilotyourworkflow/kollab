@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app import keypool
+from app.fraud.graph import get_graph_store
 from app.config import (
     get_settings,
     request_override_present,
@@ -161,7 +162,19 @@ def health() -> dict:
         # Env-configured Apify key pool (APIFY_TOKEN, APIFY_TOKEN_1..N): count + how
         # many are currently healthy. No network, no tokens — just a sanity readout.
         "apify_key_pool": keypool.status(),
+        # Which backend the persistent commenter graph runs on (cheap flag; the full
+        # size/pod readout is GET /api/graph). "neon" = durable, "memory" = demo.
+        "commenter_graph": get_graph_store().backend,
     }
+
+
+@app.get("/api/graph")
+def graph_endpoint() -> dict:
+    """The persistent cross-run commenter graph readout — the fraud-recall moat, made
+    inspectable: how many creators/commenters/edges it holds and how many pod clusters
+    it has learned. `durable` is true on the Neon backend, false for the ephemeral demo
+    graph. Aggregate counts only — never a uid or handle. Never raises."""
+    return get_graph_store().stats()
 
 
 @app.get("/api/db-status")
