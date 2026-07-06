@@ -4,13 +4,19 @@ import {
   ChevronRight,
   CheckCircle2,
   ShieldAlert,
+  ShieldQuestion,
   TriangleAlert,
   Ban,
   Check,
   ExternalLink,
   RotateCcw,
+  FileText,
+  Coins,
+  Rocket,
+  Lock,
+  Network,
 } from "lucide-react"
-import type { Kol, HitlStatus } from "../../lib/types"
+import type { ClientBrief, Kol, HitlStatus } from "../../lib/types"
 import { cn } from "../../lib/cn"
 import { compact } from "../../lib/format"
 import { Avatar } from "../ui/Avatar"
@@ -19,12 +25,21 @@ import { RiskBadge } from "../ui/RiskBadge"
 import { ProvenanceChip } from "../ui/ProvenanceChip"
 import { ScoreBar } from "../ui/ScoreBar"
 import { TierChip } from "../ui/TierChip"
+import { RateEstimate } from "./RateEstimate"
+import { AfterBooking } from "./AfterBooking"
 
 /** Shared column template so header + rows stay aligned. */
 export const COLS =
   "grid grid-cols-[minmax(240px,1.6fr)_84px_92px_96px_60px_210px_150px_34px] items-center gap-3"
 
 type Decision = { status: HitlStatus; reason?: string }
+
+type PanelTab = "evidence" | "economics" | "after"
+const TABS: { key: PanelTab; label: string; Icon: typeof FileText }[] = [
+  { key: "evidence", label: "Evidence", Icon: FileText },
+  { key: "economics", label: "Economics", Icon: Coins },
+  { key: "after", label: "After booking", Icon: Rocket },
+]
 
 const reasonChips: Record<"approved" | "rejected", string[]> = {
   approved: ["Verified manually", "Client requested", "False-positive signal"],
@@ -96,13 +111,17 @@ function FactorRow({
 
 function EvidencePanel({
   kol,
+  brief,
   decision,
   onDecide,
 }: {
   kol: Kol
+  brief: ClientBrief
   decision: Decision
   onDecide: (status: HitlStatus, reason?: string) => void
 }) {
+  const [tab, setTab] = useState<PanelTab>("evidence")
+  const approved = decision.status === "approved"
   const [lang, setLang] = useState<"en" | "th">("en")
   const [pending, setPending] = useState<"approved" | "rejected" | null>(null)
   const [reason, setReason] = useState("")
@@ -125,6 +144,48 @@ function EvidencePanel({
         </div>
       </div>
 
+      {/* sub-tabs: Evidence (default) · Economics · After booking (unlocks on approve) */}
+      <div className="mb-4 flex items-center gap-1 border-b border-border">
+        {TABS.map((t) => {
+          const locked = t.key === "after" && !approved
+          const active = tab === t.key
+          return (
+            <button
+              key={t.key}
+              disabled={locked}
+              onClick={() => setTab(t.key)}
+              className={cn(
+                "relative -mb-px flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium transition-colors",
+                locked ? "cursor-not-allowed text-ink-300" : active ? "text-brand" : "text-ink-500 hover:text-ink",
+              )}
+              title={locked ? "Approve this creator to unlock the post-booking toolkit" : undefined}
+            >
+              {locked ? <Lock size={13} /> : <t.Icon size={13} />} {t.label}
+              {active && <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand" />}
+            </button>
+          )
+        })}
+      </div>
+
+      {tab === "economics" && (
+        <div className="max-w-xl">
+          <RateEstimate kol={kol} />
+        </div>
+      )}
+      {tab === "after" &&
+        (approved ? (
+          <div className="max-w-xl">
+            <AfterBooking kol={kol} brief={brief} />
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border-strong bg-surface/50 px-4 py-8 text-center text-[13px] text-ink-500">
+            <Lock size={18} className="mx-auto mb-2 text-ink-400" />
+            Approve this creator to unlock the post-booking toolkit — delivered-post re-audit, the delivery ledger,
+            and a grounded outreach draft.
+          </div>
+        ))}
+
+      {tab === "evidence" && (
       <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
         {/* Signals */}
         <div>
@@ -198,8 +259,26 @@ function EvidencePanel({
                   </div>
                   <p className="mt-1 text-[12px] leading-relaxed text-ink-700">{s.detail}</p>
                   <p className="mt-1 text-[11px] text-ink-500">Measured against {s.measuredAgainst}.</p>
+                  {s.label === "Comment pod" && (
+                    <p className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-brand">
+                      <Network size={11} /> Tracked in Kollab's cross-run commenter graph — recall compounds every
+                      campaign.
+                    </p>
+                  )}
                 </div>
               ))}
+              {kol.brandSafety.status === "flag" && (
+                <div className="rounded-lg border border-risk-med-border bg-risk-med-bg p-3">
+                  <div className="flex items-center gap-1.5">
+                    <ShieldQuestion size={14} className="text-risk-med-fg" />
+                    <span className="text-[13px] font-semibold text-risk-med-fg">Brand-safety review</span>
+                  </div>
+                  <p className="mt-1 text-[12px] leading-relaxed text-ink-700">{kol.brandSafety.note}</p>
+                  <p className="mt-1 text-[11px] text-ink-500">
+                    A separate axis from fraud risk — routed to a human, never auto-excluded.
+                  </p>
+                </div>
+              )}
               {kol.conflict.status === "flag" && (
                 <div className="rounded-lg border border-risk-med-border bg-risk-med-bg p-3">
                   <div className="flex items-center gap-1.5">
@@ -343,18 +422,21 @@ function EvidencePanel({
           </div>
         </div>
       </div>
+      )}
     </div>
   )
 }
 
 export function KolRow({
   kol,
+  brief,
   rank,
   decision,
   onDecide,
   variant = "row",
 }: {
   kol: Kol
+  brief: ClientBrief
   rank: number
   decision: Decision
   onDecide: (status: HitlStatus, reason?: string) => void
@@ -515,7 +597,7 @@ export function KolRow({
               aria-label={`Evidence for ${kol.handle}`}
               className="animate-evidence-in outline-none"
             >
-              <EvidencePanel kol={kol} decision={decision} onDecide={onDecide} />
+              <EvidencePanel kol={kol} brief={brief} decision={decision} onDecide={onDecide} />
             </div>
           </motion.div>
         )}

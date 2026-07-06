@@ -411,6 +411,7 @@ export function Shortlist() {
                   <KolRow
                     variant="card"
                     kol={kol}
+                    brief={entry.brief}
                     rank={i + 1}
                     decision={entry.decisions[kol.id] ?? { status: kol.hitl }}
                     onDecide={(status, reason) => setDecision(kol.id, status, reason)}
@@ -449,6 +450,7 @@ export function Shortlist() {
                     <KolRow
                       variant="row"
                       kol={kol}
+                      brief={entry.brief}
                       rank={i + 1}
                       decision={entry.decisions[kol.id] ?? { status: kol.hitl }}
                       onDecide={(status, reason) => setDecision(kol.id, status, reason)}
