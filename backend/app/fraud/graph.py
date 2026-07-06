@@ -290,8 +290,11 @@ def get_graph_store() -> GraphStore:
 
 
 def _corpus_signature(corpus: Iterable[RawKOL]) -> str:
-    ids = sorted({k.profile.author_id for k in corpus if k.profile.author_id})
-    return f"{len(ids)}:{hash(tuple(ids)) & 0xFFFFFFFF}"
+    # Key on the actual edge set, not just the creator ids — a re-scrape of the SAME
+    # creators that surfaced new commenters must still record (record_edges is idempotent,
+    # so the seed's fixed edge set still no-ops after the first run).
+    edges = sorted(set(edges_from_corpus(corpus)))
+    return f"{len(edges)}:{hash(tuple(edges)) & 0xFFFFFFFF}"
 
 
 def remember_edges(corpus: Iterable[RawKOL], source: str = "") -> int:

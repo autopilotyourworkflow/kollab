@@ -126,6 +126,9 @@ class Kol(CamelModel):
     hitl: HitlStatus = "pending"
     # Full vetting ledger (every check + withheld ones) for the internal report.
     checks: list[VetCheck] = []
+    # When logged deliveries nudged the fit, the label explaining the adjustment (so the
+    # displayed fit reconciles with the factor math). None when no outcomes are logged.
+    delivery_note: str | None = None
 
 
 class OverlapPair(CamelModel):

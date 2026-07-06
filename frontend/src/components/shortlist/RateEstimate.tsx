@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react"
+import { useMemo, useSyncExternalStore } from "react"
 import { Coins, Info, RotateCcw } from "lucide-react"
 import type { Kol } from "../../lib/types"
-import { CPM_DEFAULT, computeBand, loadCpm, saveCpm } from "../../lib/rate"
+import { CPM_DEFAULT, computeBand, getCpm, setCpmShared, subscribeCpm } from "../../lib/rate"
 import { compact } from "../../lib/format"
 import { cn } from "../../lib/cn"
 
@@ -9,7 +9,7 @@ import { cn } from "../../lib/cn"
  *  It is the creator's own measured organic reach × an editable CPM YOU set × authenticity.
  *  Never a market rate card: drag the CPM and the band rescales linearly. */
 export function RateEstimate({ kol }: { kol: Kol }) {
-  const [cpm, setCpm] = useState<number>(() => loadCpm())
+  const cpm = useSyncExternalStore(subscribeCpm, getCpm)
   const basis = kol.rateBasis
 
   const band = useMemo(() => (basis ? computeBand(basis, cpm) : null), [basis, cpm])
@@ -29,11 +29,7 @@ export function RateEstimate({ kol }: { kol: Kol }) {
   }
 
   const nonOrganic = band.high <= 0 // authenticity assessed the reach as non-organic
-  const update = (v: number) => {
-    const c = Math.max(1, Math.round(v))
-    setCpm(c)
-    saveCpm(c)
-  }
+  const update = (v: number) => setCpmShared(v)
 
   return (
     <div className="space-y-4">

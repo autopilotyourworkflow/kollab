@@ -30,6 +30,9 @@ _ANCHOR = datetime(2026, 7, 5, 9, 0, 0, tzinfo=timezone.utc)
 
 # Authenticity drop (pre - post) that counts as a real degradation, not noise.
 DEGRADE_DROP = 15
+# Below this many delivered-post comments the structural detectors can't fire reliably,
+# so the re-audit WITHHOLDS ("inconclusive") rather than reporting absence-of-data as clean.
+REAUDIT_MIN_COMMENTS = 15
 
 
 def reaudit_delivered_post(kol: RawKOL, pre_authenticity: int | None = None,
@@ -49,7 +52,10 @@ def reaudit_delivered_post(kol: RawKOL, pre_authenticity: int | None = None,
     post_auth = result.authenticity_score
     fired = result.risk.level != "clear"
 
-    if pre_authenticity is None:
+    if len(kol.comments) < REAUDIT_MIN_COMMENTS:
+        # Absence of evidence is not evidence of authenticity — withhold, same rule as vetting.
+        verdict = "inconclusive"
+    elif pre_authenticity is None:
         verdict = "degraded" if fired else "consistent"
     else:
         drop = pre_authenticity - post_auth
@@ -61,12 +67,19 @@ def reaudit_delivered_post(kol: RawKOL, pre_authenticity: int | None = None,
             verdict = "consistent"
 
     labels = ", ".join(s.label for s in result.risk.signals) or "no new signals"
+    # The "degraded" note only claims a pre→post diff when a baseline was actually supplied.
+    if pre_authenticity is None:
+        degraded_note = (f"The delivered post shows engagement patterns ({labels}). No pre-booking "
+                         f"baseline was supplied to diff against; post-booking authenticity is "
+                         f"{post_auth}. Escalate before the next payment.")
+    else:
+        degraded_note = (f"The delivered post shows engagement patterns absent pre-booking ({labels}). "
+                         f"Authenticity {pre_authenticity}→{post_auth}. Escalate before the next payment.")
     note = {
-        "degraded": f"The delivered post shows engagement patterns absent pre-booking ({labels}). "
-                    f"Authenticity {pre_authenticity}→{post_auth}. Escalate before the next payment.",
+        "degraded": degraded_note,
         "consistent": f"Delivered post is consistent with the pre-booking vet ({labels}).",
         "cleared": "Delivered post looks clean — the earlier concern did not repeat here.",
-        "inconclusive": "Delivered-post sample too thin to judge.",
+        "inconclusive": f"Delivered-post sample too thin to judge ({len(kol.comments)} comments) — withheld.",
     }[verdict]
 
     return DeliveryAudit(

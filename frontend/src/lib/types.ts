@@ -83,6 +83,8 @@ export interface Kol {
   rateBasis?: RateBasis | null
   /** Full vetting ledger for the internal report (fired / clear / withheld). */
   checks?: VetCheck[]
+  /** Label for a logged-delivery fit adjustment, so the fit reconciles with the factors. */
+  deliveryNote?: string | null
   hitl: HitlStatus
 }
 

@@ -30,6 +30,31 @@ export function saveCpm(cpm: number): void {
   }
 }
 
+// ── Shared CPM store (useSyncExternalStore) ──────────────────────────────────
+// Same-tab localStorage writes emit no 'storage' event, so a plain per-mount useState
+// would let two open Economics panels drift. This tiny store keeps them all in sync.
+let _cpm = loadCpm()
+const _subs = new Set<() => void>()
+
+export function getCpm(): number {
+  return _cpm
+}
+
+export function subscribeCpm(cb: () => void): () => void {
+  _subs.add(cb)
+  return () => {
+    _subs.delete(cb)
+  }
+}
+
+export function setCpmShared(cpm: number): void {
+  const c = Math.max(1, Math.round(cpm))
+  if (c === _cpm) return
+  _cpm = c
+  saveCpm(c)
+  _subs.forEach((cb) => cb())
+}
+
 /** Rescale the band for a new CPM — linear, identical to the backend fair_rate_band(). */
 export function computeBand(basis: RateBasis, cpm: number): RateBand {
   const disc = Math.max(0, Math.min(1, basis.authenticity / 100))

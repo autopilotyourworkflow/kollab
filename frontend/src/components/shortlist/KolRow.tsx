@@ -202,6 +202,11 @@ function EvidencePanel({
               />
             ))}
           </div>
+          {kol.deliveryNote && (
+            <p className="mt-2 flex items-start gap-1.5 rounded-md bg-brand-50/60 px-2.5 py-1.5 text-[11px] leading-relaxed text-brand">
+              <Network size={12} className="mt-0.5 shrink-0" /> Fit includes a delivery adjustment — {kol.deliveryNote}
+            </p>
+          )}
         </div>
 
         {/* Why + flags + HITL */}

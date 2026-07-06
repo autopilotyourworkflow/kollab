@@ -104,8 +104,9 @@ def build_shortlist(
         factors = build_factors(kol, pres, vet, last_days)
         fit = fit_score(factors)
         d_ratios = delivery_map.get(norm_handle(kol.profile.unique_id), [])
+        delivery_note = None
         if d_ratios:  # only when this creator has logged outcomes (learning state otherwise)
-            adj, _ = delivery_adjustment(d_ratios)
+            adj, delivery_note = delivery_adjustment(d_ratios)
             fit = max(0, min(100, fit + adj))
         why_en, why_th = _why(pres, kol, vet, fit)
         # Fair-rate estimate: the creator's own organic reach × the default CPM
@@ -138,6 +139,7 @@ def build_shortlist(
             rate_basis=rate_basis,
             hitl=pres.hitl,
             checks=to_checks(vet.raw_signals),  # full ledger for the internal report
+            delivery_note=delivery_note,
         ))
 
     kols.sort(key=lambda k: k.fit_score, reverse=True)
