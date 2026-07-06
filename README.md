@@ -55,7 +55,7 @@ Every threshold is a named, documented, retunable constant (`app/fraud/signals.p
 
 ## Live vs. computed
 
-The frontend fetches `GET /api/shortlist` over HTTP and renders whatever the pipeline computed — every count, badge, and rationale on screen derives from that payload (the footer names the active source). On the hosted demo the endpoint is a Cloudflare Pages Function serving the **Python pipeline's own output** (regeneration command documented in `frontend/functions/api/shortlist.ts`); point `VITE_API_URL` at a running FastAPI instance (see `render.yaml`) for live per-request compute. If the API is unreachable, the bundled fallback keeps the demo alive — and it **imports the same committed payload the Function serves**, so fallback and API are byte-identical by construction. The fraud verdicts are computed **from first principles** on Apify-shaped data (see the 95-test suite); the live Apify pull runs behind the same `KOLSource` interface (budget-capped loop + mappers, tested against a fake client; first live run = calibration), and a licensed feed is one more adapter.
+The frontend fetches `GET /api/shortlist` over HTTP and renders whatever the pipeline computed — every count, badge, and rationale on screen derives from that payload (the footer names the active source). On the hosted demo the endpoint is a Cloudflare Pages Function serving the **Python pipeline's own output** (regeneration command documented in `frontend/functions/api/shortlist.ts`); point `VITE_API_URL` at a running FastAPI instance (see `render.yaml`) for live per-request compute. If the API is unreachable, the bundled fallback keeps the demo alive — and it **imports the same committed payload the Function serves**, so fallback and API are byte-identical by construction. The fraud verdicts are computed **from first principles** on Apify-shaped data (see the 201-test suite); the live Apify pull runs behind the same `KOLSource` interface (budget-capped loop + mappers, tested against a fake client; first live run = calibration), and a licensed feed is one more adapter.
 
 ## Architecture
 
@@ -97,14 +97,16 @@ backend/
     schemas.py     output contract (mirrors frontend/src/lib/types.ts)
     raw.py         Apify-shaped ingestion models
     ingest/        Brand DNA: website → brief (Claude → Gemini → rules skeleton)
-    fraud/         cohort stats + structural detectors + vetting orchestration  ← the hero
+    fraud/         cohort stats + structural detectors + vetting + graph (moat) + brand-safety + re-audit
     sources/       KOLSource interface + Seed (fixtures) + Apify budget-capped loop
-    matching/      deterministic scoring + lexical topic fallback + LLM rerank + validator
+    matching/      scoring + lexical topic + LLM rerank/validator + overlap + outreach + delivery nudge
+    pricing/       fraud-adjusted fair-rate estimator (measured reach × your CPM × authenticity)
     trust/         provenance + deterministic confidence
+    ledger.py      durable delivery-outcome ledger (Neon) → closed-loop re-rank nudge
     llm.py         thin Claude/Gemini callers (lazy imports; fakes in tests)
     pipeline.py    brief → enrich → vet → match → rank → ShortlistResponse
-    main.py        FastAPI app (/health, /api/shortlist, /api/brand-dna)
-  tests/           95 unit + integration tests (synthetic data + fake clients)
+    main.py        FastAPI app (/health, /api/shortlist, /api/graph, /api/re-audit, /api/deliveries, /api/outreach)
+  tests/           201 unit + integration tests (synthetic data + fake clients + hermetic SQLite)
   eval/            labeling rubric + labels + precision@k / recall@k harness
 ops/n8n/           importable re-vet + alert workflow (cron + manual webhook)
 docs/              architecture + ethics + eval report + screenshots
@@ -130,7 +132,7 @@ python -m venv .venv
 
 # macOS / Linux                                # Windows
 .venv/bin/pip install -r requirements.txt pytest httpx     # .venv\Scripts\pip install -r requirements.txt pytest httpx
-.venv/bin/python -m pytest                                  # .venv\Scripts\python -m pytest          (73 tests, <1s)
+.venv/bin/python -m pytest                                  # .venv\Scripts\python -m pytest          (201 tests, <2s)
 .venv/bin/python -m uvicorn app.main:app --reload           # .venv\Scripts\python -m uvicorn app.main:app --reload
 ```
 
@@ -140,11 +142,21 @@ The API serves docs at http://127.0.0.1:8000/docs. `GET /api/shortlist` returns 
 
 The headline is **workflow ROI**: a shortlist that takes an account manager hours of manual research becomes ~15 minutes and is more defensible. The baseline hours are shown as an **editable input**, to be anchored to a *timed real run* of the manual process (honest and cheap) rather than an invented benchmark. A secondary line links avoided fake-KOL bookings to reduced fraud-spend waste. Campaign-reach projections use pulled **organic** view medians (boosted posts excluded), labelled as historical-not-guaranteed with a wide confidence band. **Rate/tier modeling is deliberately roadmap** — it belongs to the agency's own closed-deal data + licensed feeds, never a scraped or invented number.
 
+## What happens after the match (the overdelivery)
+
+Discovery is commoditized; the moat is the **proprietary data Kollab accumulates**, so shortlists provably improve every campaign. These post-match features are built to real depth and stay inside the honesty bounds — anything that depends on data the user hasn't logged shows an explicit **learning state**, never a fabricated number.
+
+- **Persistent cross-run commenter graph (the moat).** Every run records its observed `commenter → creator` edges to Neon. At vet time the accumulated graph is unioned into the in-run index *before* the unchanged, gated detector runs — so a pod that only touched a couple of this run's creators but hits many across your history gets caught. **Fraud recall improves every run**, and history can only push a *real* pattern over an honest threshold, never invent a pod from absence of data (`GET /api/graph`, surfaced on the Dashboard + Settings).
+- **Delivered-post re-audit.** After a booked creator posts the paid content, re-run the exact same detectors on the delivered post and diff against the pre-booking vet — catches a creator who was clean when vetted but bought engagement for the sponsored post (`POST /api/re-audit`).
+- **Closed-loop delivery ledger.** Log a campaign outcome (projected vs actual reach); a bounded, clearly-labelled nudge feeds the re-rank. Neutral learning state until you log one — outcome data is never fabricated (`/api/deliveries`, durable in Neon).
+- **Fraud-adjusted fair-rate estimate.** The creator's own outlier-excluded organic reach × an **editable CPM you control** × authenticity, arithmetic shown, band rescaling live. Explicitly *not* a market rate card; a flagged creator reads "not reach-priceable".
+- **Commenter-overlap dedup, brand-safety scan, grounded outreach draft, and an internal vetting-report export** round it out — each measured/inferred-tagged, human-review-not-auto-exclude, and (for outreach) citation-validated with a safe allowlist so no internal verdict can leak into a message sent to the creator.
+
 ## What's built vs. roadmap
 
-**Built:** deployed demo served by the pipeline API over HTTP (bundled fallback = the same committed payload) · structural-first fraud vetting with cohort math + min-n rule + Thai-lexicon pod corroboration · KOLSource adapter: Seed + the **budget-capped Apify sourcing loop** (fake-client tested; token-activated) · **run-depth selector** (Scan/Standard/Deep/custom with live cost estimates, editable hard cap, and per-depth quality notes; UI numbers parity-tested against the backend) · **Brand DNA chain** (Claude → Gemini → rules skeleton, `/api/brand-dna`, source-labeled + degraded-flagged) · deterministic matching + lexical topic fallback + **citation-validated LLM rerank** (uncited claims rejected, deterministic copy stays) · provenance tags + inferred-field advisory on every factor · pipeline-derived cost meter · 95-test suite · **eval harness** (rubric + labels + precision@k/recall@k, [docs/EVAL.md](docs/EVAL.md)) · **n8n re-vet + alert workflow** ([ops/n8n](ops/n8n/), cron + manual webhook) · editable persisted brand brief · Render deploy blueprint + [go-live runbook](docs/GO-LIVE.md) · Comfortable/Spacious density toggle · WCAG-minded a11y pass (skip link, aria-live, keyboard menu, reduced-motion).
+**Built:** deployed demo served by the pipeline API over HTTP (bundled fallback = the same committed payload) · structural-first fraud vetting with cohort math + min-n rule + Thai-lexicon pod corroboration · **persistent cross-run commenter graph** (Neon-backed, recall improves every run; in-memory backend for the demo) · **delivered-post re-audit** · **closed-loop delivery ledger + bounded re-rank** (learning-state honest) · **fraud-adjusted fair-rate estimator** (editable CPM, never a rate card) · **commenter-overlap dedup** · **transparent brand-safety scan** (documented lexicon, human-review) · **grounded citation-validated outreach draft** (safe allowlist) · **internal vetting-report export** (shows the withheld checks) · KOLSource adapter: Seed + the **budget-capped Apify sourcing loop** (fake-client tested; token-activated) · **run-depth selector** (Scan/Standard/Deep/custom with live cost estimates, editable hard cap, and per-depth quality notes; UI numbers parity-tested against the backend) · **Brand DNA chain** (Claude → Gemini → rules skeleton, `/api/brand-dna`, source-labeled + degraded-flagged) · deterministic matching + lexical topic fallback + **citation-validated LLM rerank** (uncited claims rejected, deterministic copy stays) · provenance tags + inferred-field advisory on every factor · pipeline-derived cost meter · **201-test suite** · **eval harness** (rubric + labels + precision@k/recall@k, [docs/EVAL.md](docs/EVAL.md)) · **n8n re-vet + alert workflow** ([ops/n8n](ops/n8n/), cron + manual webhook) · in-app **operating guide** (copy-as-Markdown) · editable persisted brand brief · Render deploy blueprint + [go-live runbook](docs/GO-LIVE.md) · Comfortable/Spacious density toggle · WCAG-minded a11y pass (skip link, aria-live, keyboard menu, reduced-motion).
 
-**Roadmap:** first live calibration run against the real actors + the recorded live-extraction demo · embeddings/pgvector retrieval for recall at licensed-feed scale · persisted multi-run store for shortlists + HITL decisions · surfacing the computed-confidence functions (`app/trust/confidence.py`, built + tested) in the API contract and UI · re-labeling the eval on the live seed cohort (2 brands × 20) · PDF deck export · Thai-native validation of the taboo list + comment lexicon · rate/tier learned from agency deal history.
+**Roadmap:** first live calibration run against the real actors + the recorded live-extraction demo · embeddings/pgvector retrieval for recall at licensed-feed scale · Neon-backed multi-run store for the **shortlists workspace + HITL decisions** (currently browser-first; the graph + delivery ledger are already Neon-durable) · a native deal-pipeline board (kanban; the outreach → booked → delivered stages) · surfacing the computed-confidence functions (`app/trust/confidence.py`, built + tested) in the API contract and UI · re-labeling the eval on the live seed cohort (2 brands × 20) · Thai-native validation of the taboo list + comment lexicon · a *learned* rate/tier model from accumulated agency deal history (today's estimator is a transparent CPM-on-measured-reach band).
 
 ## Status
 
