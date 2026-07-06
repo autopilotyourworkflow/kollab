@@ -1,293 +1,154 @@
-"""Apify API-key POOL with automatic rotation.
+"""Apify key rotation — straight from environment variables. No database, no UI.
 
-The operator pastes several Apify account tokens (each free account carries $5/cycle).
-This module is the single authority that (a) picks the fattest healthy key for a run,
-(b) marks a key exhausted the instant it hits Apify's usage wall so the next run — and
-the current run, mid-flight — transparently swaps to another, and (c) is refreshed on a
-schedule so keys flip active -> low -> exhausted BEFORE a run reaches the wall.
+The operator sets APIFY_TOKEN_1, APIFY_TOKEN_2, APIFY_TOKEN_3, ... (and/or the legacy
+APIFY_TOKEN) in the server environment (Render). Kollab uses them in order and swaps
+to the next automatically when one runs low or hits Apify's usage wall:
 
-Design ties into the existing seams:
-  - selection replaces `settings.effective_apify_token` inside service.make_source
-  - reactive swap wraps the one actor call site (ApifyAdapter._run_actor)
-  - proactive refresh reuses credit.fetch_apify_credit (GET /v2/users/me/limits)
+  - reactive  — a 402/403/x402/invalid-token error on the current key marks it drained
+    (in memory) and the run retries on the next key, mid-flight (see ApifyAdapter).
+  - proactive — a background refresher (main._start_key_refresher) polls each key's
+    Apify balance every KOLLAB_KEY_REFRESH_MINUTES and drains the low/empty ones, so
+    runs skip them BEFORE hitting the wall. Drained keys auto-recover when Apify's
+    monthly cycle refills, or on process restart.
 
-Tokens are stored encrypted (app.crypto) and NEVER returned over HTTP. Everything here
-degrades honestly: if the DB is absent, the enc secret is unset, or `cryptography` is
-missing, `available()` is False and the whole system falls back to the env/BYOK key —
-exactly today's behavior.
-
-The 'single source of truth' is the Neon row `status`, mutated only via `mark()`. A key
-flipped to 'exhausted' is invisible to the very next `acquire()` in any thread/instance
-(Postgres read-committed), so concurrent runs never grab a dead key.
+State is a small in-memory set of drained fingerprints — self-healing: the refresher
+re-evaluates on boot and the reactive path re-marks on error. Tokens live only in the
+environment + memory; they are never written to disk, logged, or returned over HTTP.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
-import uuid
+import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from app.credit import fetch_apify_credit
-from app.crypto import decrypt_token, enc_secret_present, encrypt_token, fingerprint, mask
-from app.db import database_url, get_sessionmaker
-
-APIFY_ME_URL = "https://api.apify.com/v2/users/me"
-
-# USD thresholds (env-tunable). A key at/under MIN is exhausted; at/under LOW it is
-# 'low' (still usable, but deprioritized behind any 'active' key).
-LOW_USD = float(os.getenv("KOLLAB_KEY_LOW_USD", "1.0"))
-MIN_USD = float(os.getenv("KOLLAB_KEY_MIN_USD", "0.25"))
-
-
-def _low_usd() -> float:
-    return float(os.getenv("KOLLAB_KEY_LOW_USD", "1.0"))
 
 
 def _min_usd() -> float:
-    return float(os.getenv("KOLLAB_KEY_MIN_USD", "0.25"))
+    """A key with less than this many USD left is skipped (swap 'when low'). Default $0.50."""
+    try:
+        return float(os.getenv("KOLLAB_KEY_MIN_USD", "0.50"))
+    except ValueError:
+        return 0.50
 
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+def _fp(token: str) -> str:
+    """Short, one-way id for a token — safe to log/show; never reveals the token."""
+    return hashlib.sha256(token.encode()).hexdigest()[:12]
+
+
+def _mask(token: str) -> str:
+    tail = token[-4:] if len(token) >= 4 else ""
+    return f"apify_api_…{tail}" if token.startswith("apify_api_") else f"…{tail}"
 
 
 @dataclass
 class Lease:
-    """A key handed to one run. `token` is decrypted and in-memory only."""
-    key_id: str
-    label: str
+    key_id: str   # fingerprint
+    label: str    # env var name it came from (APIFY_TOKEN_2, ...)
     token: str
 
 
+# Fingerprints of keys currently considered drained/unusable -> reason (in-memory,
+# per process; reset on restart, re-derived by the refresher + reactive path).
+_drained: dict[str, str] = {}
+
+
+def env_tokens() -> list[tuple[str, str]]:
+    """Ordered [(label, token)]: APIFY_TOKEN first (legacy), then APIFY_TOKEN_1..N in
+    numeric order. Blanks and duplicate tokens removed."""
+    candidates: list[tuple[str, str]] = []
+    base = (os.getenv("APIFY_TOKEN") or "").strip()
+    if base:
+        candidates.append(("APIFY_TOKEN", base))
+    numbered: list[tuple[int, str, str]] = []
+    for name, value in os.environ.items():
+        m = re.fullmatch(r"APIFY_TOKEN_(\d+)", name)
+        if m and (value or "").strip():
+            numbered.append((int(m.group(1)), name, value.strip()))
+    numbered.sort()
+    for _, name, value in numbered:
+        candidates.append((name, value))
+
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for label, tok in candidates:
+        if tok not in seen:
+            seen.add(tok)
+            out.append((label, tok))
+    return out
+
+
 def available() -> bool:
-    """True when the pool can operate: a DB is configured AND an encryption secret is
-    set. When False, callers fall back to the env/BYOK token path (no regression)."""
-    return bool(database_url()) and enc_secret_present() and get_sessionmaker() is not None
+    """True when at least one operator token is configured in the environment."""
+    return len(env_tokens()) > 0
 
 
-def _sm():
-    sm = get_sessionmaker()
-    if sm is None:
-        raise RuntimeError("Key pool needs a database — set DATABASE_URL.")
-    return sm
-
-
-def _status_for(remaining) -> str | None:
-    """Map a remaining-USD reading to a status, or None to leave status unchanged
-    (e.g. balance unreported)."""
-    if remaining is None:
-        return None
-    if remaining <= _min_usd():
-        return "exhausted"
-    if remaining <= _low_usd():
-        return "low"
-    return "active"
-
-
-# ── selection (the run path) ────────────────────────────────────────────────
 def acquire(exclude_ids: set[str] | None = None) -> Lease | None:
-    """Pick the fattest usable key. Prefers active > low, then most credits_remaining
-    (unchecked/None sorts last), then priority, then oldest. `exclude_ids` are keys the
-    current run already burned, so a mid-run swap never re-hands the same dead key.
-    Returns None when nothing usable remains."""
-    from app.models import ApifyKey
-
+    """The first env token that isn't excluded and isn't currently drained. Order is
+    APIFY_TOKEN then _1.._N, so Kollab burns them predictably in sequence. `exclude_ids`
+    are keys the current run already tried, so a mid-run swap never re-hands a dead one."""
     exclude = set(exclude_ids or ())
-    with _sm()() as s:
-        rows = [r for r in s.query(ApifyKey).filter(ApifyKey.status.in_(("active", "low"))).all()
-                if r.id not in exclude]
-        if not rows:
-            return None
-
-        def sort_key(r):
-            credit = r.credits_remaining if r.credits_remaining is not None else float("-inf")
-            return (
-                0 if r.status == "active" else 1,   # active before low
-                -credit,                            # more credit first; None last
-                r.priority,
-                r.added_at or _utcnow(),
-            )
-
-        best = min(rows, key=sort_key)
-        best.last_used_at = _utcnow()
-        s.commit()
-        return Lease(key_id=best.id, label=best.label, token=decrypt_token(best.token_encrypted))
+    for label, tok in env_tokens():
+        fp = _fp(tok)
+        if fp in exclude or fp in _drained:
+            continue
+        return Lease(key_id=fp, label=label, token=tok)
+    return None
 
 
 def mark(key_id: str, status: str, error: str | None = None) -> None:
-    """Atomically flip a key's status — the swap primitive. Once 'exhausted'/'invalid',
-    the next acquire() in any thread/instance stops selecting it."""
-    from app.models import ApifyKey
-
-    with _sm()() as s:
-        row = s.get(ApifyKey, key_id)
-        if row is None:
-            return
-        row.status = status
-        if error is not None:
-            row.last_error = error[:500]
-        s.commit()
-
-
-# ── management (operator, admin-gated at the HTTP layer) ─────────────────────
-def _validate_token(token: str) -> tuple[bool, int, str]:
-    """Live liveness check: GET /v2/users/me. (True, 200, '') when the token is valid;
-    otherwise (False, http_status_to_return, message). Never raises."""
-    try:
-        import httpx  # lazy: live-path dep
-    except ImportError:
-        # Can't reach out offline — accept, but the first real run/refresh will catch a
-        # bad key reactively (401 -> invalid).
-        return (True, 200, "")
-    try:
-        r = httpx.get(APIFY_ME_URL, params={"token": token}, timeout=12.0)
-    except Exception as e:
-        return (False, 502, f"Could not reach Apify to validate the key: {type(e).__name__}")
-    if r.status_code == 401:
-        return (False, 400, "Apify rejected this token (invalid or revoked).")
-    if r.status_code != 200:
-        return (False, 400, f"Apify returned HTTP {r.status_code} validating this token.")
-    return (True, 200, "")
-
-
-def add_key(token: str, label: str = "") -> dict:
-    """Validate a pasted token live, seed its balance, and insert it as a pool key.
-    Dedups on fingerprint (adding the same key twice is a 409, not a duplicate).
-    Returns {ok: True, key: <public dict>} or {ok: False, status, error}."""
-    from app.models import ApifyKey
-
-    token = (token or "").strip()
-    if not token:
-        return {"ok": False, "status": 400, "error": "Paste an Apify token first."}
-    if not available():
-        return {"ok": False, "status": 503,
-                "error": "Key pool is disabled — set DATABASE_URL and KOLLAB_KEY_ENC_SECRET on the server."}
-
-    ok, status, err = _validate_token(token)
-    if not ok:
-        return {"ok": False, "status": status, "error": err}
-
-    bal = fetch_apify_credit(token)
-    remaining = bal.get("remainingUsd")
-    init_status = _status_for(remaining) or "active"
-    fp = fingerprint(token)
-
-    with _sm()() as s:
-        if s.query(ApifyKey).filter(ApifyKey.token_fingerprint == fp).first():
-            return {"ok": False, "status": 409, "error": "This key is already in the pool."}
-        row = ApifyKey(
-            id=uuid.uuid4().hex,
-            label=(label or "").strip() or f"account-{fp[:6]}",
-            token_encrypted=encrypt_token(token),
-            token_fingerprint=fp,
-            token_hint=mask(token),
-            status=init_status,
-            credits_remaining=remaining,
-            credits_limit=bal.get("limitUsd"),
-            credits_checked_at=_utcnow(),
-            cycle_end_at=_parse_ts(bal.get("cycleEndAt")),
-            priority=100,
-            added_at=_utcnow(),
-        )
-        s.add(row)
-        s.commit()
-        return {"ok": True, "key": row.to_public_dict()}
+    """Reactive swap primitive. 'exhausted'/'invalid' -> drained (skipped by acquire);
+    'active' -> recovered."""
+    if status in ("exhausted", "invalid"):
+        _drained[key_id] = (error or status)[:200]
+    elif status == "active":
+        _drained.pop(key_id, None)
 
 
 def refresh_all() -> dict:
-    """Poll Apify balance for every non-disabled key and flip status accordingly. A
-    transient/unreachable poll never yanks a key — it only records the check time; status
-    changes only on a real balance read (or reactively on a run's 402/401). Exhausted
-    keys auto-reactivate once the billing cycle refills. Never raises."""
-    from app.models import ApifyKey
-
-    if not available():
-        return {"checked": 0, "note": "pool disabled"}
-    with _sm()() as s:
-        ids = [r.id for r in s.query(ApifyKey).filter(ApifyKey.status != "disabled").all()]
-
+    """Proactive: poll each env token's live Apify balance and drain the low/empty ones
+    so runs skip them before hitting the wall; recover any that refilled. A transient /
+    unreported reading never drains a key. Never raises."""
+    tokens = env_tokens()
+    if not tokens:
+        return {"checked": 0, "keys": 0}
+    minimum = _min_usd()
     checked = 0
-    for kid in ids:
-        with _sm()() as s:
-            row = s.get(ApifyKey, kid)
-            if row is None:
-                continue
-            info = fetch_apify_credit(decrypt_token(row.token_encrypted))
-            row.credits_checked_at = _utcnow()
-            if not info.get("checked"):
-                row.last_error = info.get("note") or row.last_error
-            else:
-                row.credits_remaining = info.get("remainingUsd")
-                row.credits_limit = info.get("limitUsd")
-                row.cycle_end_at = _parse_ts(info.get("cycleEndAt")) or row.cycle_end_at
-                row.last_error = None
-                new_status = _status_for(info.get("remainingUsd"))
-                if new_status and row.status in ("active", "low", "exhausted"):
-                    row.status = new_status  # incl. auto-reactivate after cycle reset
-            s.commit()
-            checked += 1
-    return {"checked": checked}
+    for _label, tok in tokens:
+        fp = _fp(tok)
+        info = fetch_apify_credit(tok)
+        if not info.get("checked"):
+            continue  # network/parse blip — leave the key as-is
+        checked += 1
+        rem = info.get("remainingUsd")
+        if rem is None:
+            continue
+        if rem <= minimum:
+            _drained[fp] = f"low balance (${rem:.2f})"
+        else:
+            _drained.pop(fp, None)  # healthy (e.g. monthly refill)
+    return {"checked": checked, "keys": len(tokens)}
 
 
-def list_public() -> list[dict]:
-    from app.models import ApifyKey
-
-    if not available():
-        return []
-    with _sm()() as s:
-        rows = s.query(ApifyKey).order_by(ApifyKey.added_at.asc()).all()
-        return [r.to_public_dict() for r in rows]
-
-
-def summary() -> dict:
-    from app.models import ApifyKey
-
-    if not available():
-        return {"enabled": False, "active": 0, "low": 0, "exhausted": 0, "invalid": 0,
-                "total": 0, "totalRemainingUsd": None}
-    with _sm()() as s:
-        rows = s.query(ApifyKey).all()
-    counts = {"active": 0, "low": 0, "exhausted": 0, "invalid": 0, "disabled": 0}
-    total_rem = 0.0
-    have_rem = False
-    for r in rows:
-        counts[r.status] = counts.get(r.status, 0) + 1
-        if r.credits_remaining is not None:
-            total_rem += r.credits_remaining
-            have_rem = True
-    return {
-        "enabled": True,
-        "active": counts["active"],
-        "low": counts["low"],
-        "exhausted": counts["exhausted"],
-        "invalid": counts["invalid"],
-        "total": len(rows),
-        "totalRemainingUsd": round(total_rem, 2) if have_rem else None,
-    }
-
-
-def remove(key_id: str) -> bool:
-    from app.models import ApifyKey
-
-    if not available():
-        return False
-    with _sm()() as s:
-        row = s.get(ApifyKey, key_id)
-        if row is None:
-            return False
-        s.delete(row)
-        s.commit()
-        return True
-
-
-def _parse_ts(value) -> datetime | None:
-    """Best-effort ISO -> aware datetime; None on anything unusable."""
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except Exception:
-        return None
+def status() -> dict:
+    """Operator health view (NO tokens): key count, how many are healthy, and each
+    key's env-var name + masked hint + drained reason. Safe to surface in /health."""
+    tokens = env_tokens()
+    keys = []
+    healthy = 0
+    for label, tok in tokens:
+        fp = _fp(tok)
+        drained = fp in _drained
+        if not drained:
+            healthy += 1
+        keys.append({
+            "label": label,
+            "hint": _mask(tok),
+            "fingerprint": fp,
+            "healthy": not drained,
+            "note": _drained.get(fp),
+        })
+    return {"enabled": bool(tokens), "count": len(tokens), "healthy": healthy, "keys": keys}

@@ -1,155 +1,115 @@
-"""Apify key-pool rotation: selection, reactive swap, add/validate, refresh, and the
-admin gate. DB tests run against a temp SQLite file (no Postgres, no network); the
-Apify calls (validate + balance) are monkeypatched, so the suite stays offline and
-deterministic. Crypto/DB deps are importorskip'd so a minimal install skips cleanly."""
+"""Apify key rotation from environment variables: token discovery/order, selection,
+reactive mid-run swap, and the proactive low-balance refresh. No DB, no network — the
+Apify balance call is monkeypatched, env is set per-test, and the in-memory drained set
+is reset around each test."""
 
 from __future__ import annotations
 
-import uuid
+import os
+import re
 
 import pytest
 
-from app.db import init_db, reset_db_cache
-
 
 @pytest.fixture
-def pool_db(tmp_path, monkeypatch):
-    pytest.importorskip("sqlalchemy")
-    pytest.importorskip("cryptography")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path.as_posix()}/pool.db")
-    monkeypatch.setenv("KOLLAB_KEY_ENC_SECRET", "unit-test-passphrase")
-    reset_db_cache()
-    assert init_db() is True
-    yield
-    reset_db_cache()
-
-
-def _insert(status: str, remaining, label: str, token: str, priority: int = 100) -> str:
-    from app.crypto import encrypt_token, fingerprint, mask
-    from app.db import get_sessionmaker
-    from app.models import ApifyKey
-
-    kid = uuid.uuid4().hex
-    with get_sessionmaker()() as s:
-        s.add(ApifyKey(
-            id=kid, label=label, token_encrypted=encrypt_token(token),
-            token_fingerprint=fingerprint(token), token_hint=mask(token),
-            status=status, credits_remaining=remaining, priority=priority,
-        ))
-        s.commit()
-    return kid
-
-
-# ── encryption ──────────────────────────────────────────────────────────────
-def test_encrypt_roundtrip_and_fingerprint(monkeypatch):
-    pytest.importorskip("cryptography")
-    monkeypatch.setenv("KOLLAB_KEY_ENC_SECRET", "unit-test-passphrase")
-    from app.crypto import decrypt_token, encrypt_token, fingerprint
-
-    tok = "apify_api_supersecretvalue"
-    ct = encrypt_token(tok)
-    assert ct != tok and tok not in ct          # ciphertext hides the token
-    assert decrypt_token(ct) == tok             # roundtrips
-    assert fingerprint(tok) == fingerprint(tok) and len(fingerprint(tok)) == 12
-
-
-# ── selection ───────────────────────────────────────────────────────────────
-def test_acquire_prefers_fattest_active(pool_db):
+def pool(monkeypatch):
+    """A hermetic env pool: strip any real APIFY_TOKEN* from the environment and clear
+    the in-memory drained set before and after the test."""
     from app import keypool
 
-    _insert("active", 2.0, "a", "tokA")
-    _insert("active", 4.5, "b", "tokB")
-    _insert("low", 9.0, "c", "tokC")            # 'low' is deprioritized below any 'active'
-
-    lease = keypool.acquire()
-    assert lease.label == "b"                    # fattest ACTIVE, not the higher-credit 'low'
-    assert lease.token == "tokB"                 # decrypted correctly
-
-    lease2 = keypool.acquire(exclude_ids={lease.key_id})
-    assert lease2.label == "a"                   # exclude the burned one -> next active
+    for name in list(os.environ):
+        if name == "APIFY_TOKEN" or re.fullmatch(r"APIFY_TOKEN_\d+", name):
+            monkeypatch.delenv(name, raising=False)
+    keypool._drained.clear()
+    yield keypool
+    keypool._drained.clear()
 
 
-def test_mark_exhausted_removes_from_selection(pool_db):
-    from app import keypool
+# ── token discovery + ordering ──────────────────────────────────────────────
+def test_env_tokens_order_and_dedup(pool, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN", "tok-legacy")
+    monkeypatch.setenv("APIFY_TOKEN_2", "tok-2")
+    monkeypatch.setenv("APIFY_TOKEN_10", "tok-10")
+    monkeypatch.setenv("APIFY_TOKEN_1", "tok-1")
+    monkeypatch.setenv("APIFY_TOKEN_3", "tok-legacy")  # duplicate token value -> dropped
 
-    kid = _insert("active", 5.0, "a", "tokA")
-    assert keypool.acquire().key_id == kid
-    keypool.mark(kid, "exhausted", error="402")
-    assert keypool.acquire() is None             # exhausted key is invisible to the next run
-
-
-def test_acquire_falls_to_low_when_no_active(pool_db):
-    from app import keypool
-
-    _insert("low", 0.8, "c", "tokC")
-    lease = keypool.acquire()
-    assert lease is not None and lease.label == "c"   # 'low' is still usable
-
-
-# ── add / validate ──────────────────────────────────────────────────────────
-def test_add_key_validates_seeds_balance_and_dedups(pool_db, monkeypatch):
-    from app import keypool
-
-    monkeypatch.setattr(keypool, "_validate_token", lambda t: (True, 200, ""))
-    monkeypatch.setattr(keypool, "fetch_apify_credit",
-                        lambda t: {"remainingUsd": 5.0, "limitUsd": 5.0, "cycleEndAt": None, "checked": True})
-
-    res = keypool.add_key("apify_api_abc123", "my account")
-    assert res["ok"] and res["key"]["status"] == "active"
-    assert res["key"]["remainingUsd"] == 5.0
-    assert "apify_api_abc123" not in str(res)    # token is NEVER echoed back
-
-    dup = keypool.add_key("apify_api_abc123", "dup")
-    assert dup["ok"] is False and dup["status"] == 409
+    tokens = pool.env_tokens()
+    labels = [lbl for lbl, _ in tokens]
+    values = [val for _, val in tokens]
+    # legacy first, then numeric order 1,2,10 — and the duplicate value is removed
+    assert labels == ["APIFY_TOKEN", "APIFY_TOKEN_1", "APIFY_TOKEN_2", "APIFY_TOKEN_10"]
+    assert values == ["tok-legacy", "tok-1", "tok-2", "tok-10"]
+    assert pool.available() is True
 
 
-def test_add_key_rejects_invalid_token(pool_db, monkeypatch):
-    from app import keypool
+def test_available_false_when_no_tokens(pool):
+    assert pool.available() is False
+    assert pool.acquire() is None
 
-    monkeypatch.setattr(keypool, "_validate_token", lambda t: (False, 400, "invalid or revoked"))
-    res = keypool.add_key("apify_api_bad", "x")
-    assert res["ok"] is False and res["status"] == 400
-    assert keypool.list_public() == []           # nothing stored on rejection
+
+# ── selection + reactive marking ────────────────────────────────────────────
+def test_acquire_first_then_swap_on_mark(pool, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN_1", "tok-1")
+    monkeypatch.setenv("APIFY_TOKEN_2", "tok-2")
+
+    first = pool.acquire()
+    assert first.token == "tok-1" and first.label == "APIFY_TOKEN_1"
+
+    pool.mark(first.key_id, "exhausted", error="402")
+    second = pool.acquire()
+    assert second.token == "tok-2"
+
+    pool.mark(second.key_id, "invalid", error="401")
+    assert pool.acquire() is None                      # both drained -> nothing left
+
+    # a recovered key becomes selectable again
+    pool.mark(first.key_id, "active")
+    assert pool.acquire().token == "tok-1"
+
+
+def test_acquire_excludes_tried_keys(pool, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN_1", "tok-1")
+    monkeypatch.setenv("APIFY_TOKEN_2", "tok-2")
+    first = pool.acquire()
+    nxt = pool.acquire(exclude_ids={first.key_id})
+    assert nxt.token == "tok-2"
 
 
 # ── proactive refresh ───────────────────────────────────────────────────────
-def test_refresh_flips_low(pool_db, monkeypatch):
-    from app import keypool
+def test_refresh_drains_low_and_recovers(pool, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN_1", "tok-1")
 
-    _insert("active", 5.0, "a", "tokA")
-    monkeypatch.setattr(keypool, "fetch_apify_credit",
-                        lambda t: {"remainingUsd": 0.5, "limitUsd": 5.0, "cycleEndAt": None, "checked": True})
-    keypool.refresh_all()
-    assert keypool.list_public()[0]["status"] == "low"   # 0.25 < 0.5 <= 1.00 -> low
+    monkeypatch.setattr(pool, "fetch_apify_credit",
+                        lambda t: {"remainingUsd": 0.2, "checked": True})   # <= $0.50 min
+    pool.refresh_all()
+    assert pool.status()["healthy"] == 0
+    assert pool.acquire() is None                      # skipped because low
 
-
-def test_refresh_flips_exhausted_and_reactivates(pool_db, monkeypatch):
-    from app import keypool
-
-    kid = _insert("active", 5.0, "a", "tokA")
-    monkeypatch.setattr(keypool, "fetch_apify_credit",
-                        lambda t: {"remainingUsd": 0.0, "limitUsd": 5.0, "cycleEndAt": None, "checked": True})
-    keypool.refresh_all()
-    assert keypool.list_public()[0]["status"] == "exhausted"
-
-    # cycle refilled -> next poll auto-reactivates
-    monkeypatch.setattr(keypool, "fetch_apify_credit",
-                        lambda t: {"remainingUsd": 5.0, "limitUsd": 5.0, "cycleEndAt": None, "checked": True})
-    keypool.refresh_all()
-    assert keypool.list_public()[0]["status"] == "active"
+    monkeypatch.setattr(pool, "fetch_apify_credit",
+                        lambda t: {"remainingUsd": 4.0, "checked": True})   # refilled
+    pool.refresh_all()
+    assert pool.status()["healthy"] == 1
+    assert pool.acquire().token == "tok-1"
 
 
-def test_refresh_transient_failure_does_not_yank_key(pool_db, monkeypatch):
-    from app import keypool
-
-    _insert("active", 5.0, "a", "tokA")
-    monkeypatch.setattr(keypool, "fetch_apify_credit",
-                        lambda t: {"checked": False, "note": "network blip"})
-    keypool.refresh_all()
-    assert keypool.list_public()[0]["status"] == "active"   # a flaky poll never sidelines a healthy key
+def test_refresh_transient_failure_does_not_drain(pool, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN_1", "tok-1")
+    monkeypatch.setattr(pool, "fetch_apify_credit", lambda t: {"checked": False, "note": "blip"})
+    pool.refresh_all()
+    assert pool.status()["healthy"] == 1               # a flaky poll never sidelines a key
 
 
-# ── error classification (pure, no deps) ────────────────────────────────────
+# ── status never leaks a token ──────────────────────────────────────────────
+def test_status_masks_tokens(pool, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN_1", "apify_api_SUPERSECRETVALUE")
+    st = pool.status()
+    assert st["count"] == 1 and st["healthy"] == 1
+    hint = st["keys"][0]["hint"]
+    assert "SUPERSECRETVALUE" not in str(st)           # the token is never exposed
+    assert hint.endswith("ALUE") and hint.startswith("apify_api_")
+
+
+# ── error classification (pure) ─────────────────────────────────────────────
 def test_quota_and_invalid_classification():
     from app.sources.apify import _is_invalid_token, _is_quota_error
 
@@ -167,7 +127,7 @@ def test_quota_and_invalid_classification():
     assert not _is_invalid_token(E(status_code=402))
 
 
-# ── reactive mid-run rotation (fake pool + fake client, no DB) ───────────────
+# ── reactive mid-run rotation (fake pool + fake client) ─────────────────────
 class _FakeQuotaError(Exception):
     def __init__(self, msg="Payment Required", status_code=402):
         super().__init__(msg)
@@ -223,7 +183,7 @@ def test_reactive_rotation_swaps_on_quota_error():
     from app.keypool import Lease
     from app.sources.apify import TIKTOK_SCRAPER_ACTOR, ApifyAdapter
 
-    pool = _FakePool([Lease(key_id="k2", label="acct2", token="tok2")])
+    pool = _FakePool([Lease(key_id="k2", label="APIFY_TOKEN_2", token="tok2")])
     fake = _FakeClient(items=[{"id": "v1"}], fail_n=1)
     adapter = ApifyAdapter(token="tok1", client=fake, pool=pool, initial_key_id="k1")
 
@@ -231,9 +191,7 @@ def test_reactive_rotation_swaps_on_quota_error():
 
     assert out == [{"id": "v1"}]                 # the run still succeeded, on the next key
     assert pool.marked == [("k1", "exhausted")]  # the drained key was flagged
-    assert adapter._current_key_id == "k2"       # rotated
-    assert adapter.token == "tok2"
-    assert "tok2" in adapter._touched_tokens     # tracked for cancel/abort
+    assert adapter._current_key_id == "k2" and adapter.token == "tok2"
 
 
 def test_rotation_raises_when_all_keys_drained():
@@ -256,38 +214,3 @@ def test_no_pool_keeps_legacy_behavior():
     adapter = ApifyAdapter(token="tok1", client=fake)   # no pool
     with pytest.raises(_FakeQuotaError):
         adapter._run_actor(fake, TIKTOK_SCRAPER_ACTOR, {"searchQueries": ["x"]})
-
-
-# ── admin gate ──────────────────────────────────────────────────────────────
-def test_key_endpoints_require_admin_password(pool_db, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from app.main import app
-
-    monkeypatch.delenv("KOLLAB_ADMIN_SECRET", raising=False)
-    c = TestClient(app)
-    assert c.get("/api/keys").status_code == 503          # disabled until a secret is set
-
-    monkeypatch.setenv("KOLLAB_ADMIN_SECRET", "hunter2")
-    assert c.get("/api/keys").status_code == 401          # missing header
-    assert c.get("/api/keys", headers={"X-Admin-Secret": "wrong"}).status_code == 401
-    ok = c.get("/api/keys", headers={"X-Admin-Secret": "hunter2"})
-    assert ok.status_code == 200 and ok.json()["summary"]["enabled"] is True
-
-
-def test_add_key_endpoint_never_returns_token(pool_db, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from app import keypool
-    from app.main import app
-
-    monkeypatch.setenv("KOLLAB_ADMIN_SECRET", "hunter2")
-    monkeypatch.setattr(keypool, "_validate_token", lambda t: (True, 200, ""))
-    monkeypatch.setattr(keypool, "fetch_apify_credit",
-                        lambda t: {"remainingUsd": 5.0, "limitUsd": 5.0, "cycleEndAt": None, "checked": True})
-    c = TestClient(app)
-    r = c.post("/api/keys", json={"token": "apify_api_SECRET123", "label": "acct"},
-               headers={"X-Admin-Secret": "hunter2"})
-    assert r.status_code == 200
-    assert "apify_api_SECRET123" not in r.text            # the token must never come back
-    assert r.json()["fingerprint"] and r.json()["status"] == "active"

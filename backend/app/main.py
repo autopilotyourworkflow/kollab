@@ -12,15 +12,14 @@ direct/API use.
 
 from __future__ import annotations
 
-import hmac
 import os
 from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 from app import __version__
+from app import keypool
 from app.config import (
     get_settings,
     request_override_present,
@@ -159,6 +158,9 @@ def health() -> dict:
         "shared_key": s.shared_key,
         # Cheap flag (no DB round-trip); /api/db-status does the live check.
         "db_configured": bool(database_url()),
+        # Env-configured Apify key pool (APIFY_TOKEN, APIFY_TOKEN_1..N): count + how
+        # many are currently healthy. No network, no tokens — just a sanity readout.
+        "apify_key_pool": keypool.status(),
     }
 
 
@@ -187,9 +189,17 @@ def credit(
                 return "user"
             return "shared" if (s.shared_key and owner_present) else "none"
 
-        apify = fetch_apify_credit(s.effective_apify_token)
-        apify["source"] = _source("apify_token", s.apify_enabled)
-        apify["hasKey"] = bool(s.effective_apify_token)
+        # The token the meter reports on: the visitor's own key / legacy env key if set,
+        # otherwise (sharing on) a healthy key from the env pool — so the meter stays
+        # honest when the operator only set the numbered APIFY_TOKEN_1..N.
+        meter_token = s.effective_apify_token
+        if meter_token is None and s.shared_key and not request_override_present("apify_token"):
+            lease = keypool.acquire()
+            meter_token = lease.token if lease else None
+
+        apify = fetch_apify_credit(meter_token)
+        apify["source"] = _source("apify_token", s.apify_enabled or keypool.available())
+        apify["hasKey"] = bool(meter_token)
 
         return {
             "sharedKey": s.shared_key,
@@ -317,72 +327,6 @@ def brand_dna(
         return BrandDnaResponse(
             brief=result.brief, degraded=result.degraded, source=result.source, note=result.note
         )
-
-
-# ── Apify key pool (operator-only, admin-gated) ─────────────────────────────
-# The operator pastes several Apify account tokens here; Kollab spends the fattest
-# healthy one and rotates automatically when it runs low. These endpoints are the ONLY
-# way to manage the pool and are gated behind KOLLAB_ADMIN_SECRET, so a visitor to the
-# public demo can run Kollab but can neither add keys nor see the account list. Tokens
-# are stored encrypted and are NEVER returned — responses carry only a masked hint +
-# balance.
-class AddKeyRequest(BaseModel):
-    token: str
-    label: str = ""
-
-
-def _require_admin(x_admin_secret: str | None) -> None:
-    """Gate pool management on the operator's admin password (constant-time compare).
-    Disabled entirely until KOLLAB_ADMIN_SECRET is set on the server."""
-    secret = (os.getenv("KOLLAB_ADMIN_SECRET") or "").strip()
-    if not secret:
-        raise HTTPException(
-            status_code=503,
-            detail="Key pool manager is off — set KOLLAB_ADMIN_SECRET on the server to enable it.",
-        )
-    if not x_admin_secret or not hmac.compare_digest(x_admin_secret, secret):
-        raise HTTPException(status_code=401, detail="Admin password required or incorrect.")
-
-
-@app.get("/api/keys")
-def list_keys(x_admin_secret: str | None = Header(default=None)) -> dict:
-    """The operator's pool: each key's masked hint, status, and balance (never the token),
-    plus a fleet summary. Admin-gated."""
-    _require_admin(x_admin_secret)
-    from app import keypool
-
-    return {"keys": keypool.list_public(), "summary": keypool.summary()}
-
-
-@app.post("/api/keys")
-def add_key_endpoint(req: AddKeyRequest, x_admin_secret: str | None = Header(default=None)) -> dict:
-    """Paste a new Apify token: validated live against Apify, balance read, stored
-    encrypted, and added to the rotation. Admin-gated. Returns the public key row."""
-    _require_admin(x_admin_secret)
-    from app import keypool
-
-    result = keypool.add_key(req.token, req.label)
-    if not result.get("ok"):
-        raise HTTPException(status_code=result.get("status", 400), detail=result.get("error", "invalid key"))
-    return result["key"]
-
-
-@app.post("/api/keys/refresh")
-def refresh_keys_endpoint(x_admin_secret: str | None = Header(default=None)) -> dict:
-    """Re-poll every pool key's Apify balance now and flip statuses. Admin-gated."""
-    _require_admin(x_admin_secret)
-    from app import keypool
-
-    return keypool.refresh_all()
-
-
-@app.delete("/api/keys/{key_id}")
-def delete_key_endpoint(key_id: str, x_admin_secret: str | None = Header(default=None)) -> dict:
-    """Remove a key from the pool. Admin-gated."""
-    _require_admin(x_admin_secret)
-    from app import keypool
-
-    return {"deleted": keypool.remove(key_id)}
 
 
 @app.get("/")

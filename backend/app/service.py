@@ -36,24 +36,25 @@ def make_source(preset: str | None = None, creators: int | None = None,
         return SeedDatasetSource()
 
     # Key resolution, in precedence order: a visitor's own pasted key (BYOK) always
-    # wins; otherwise the operator's rotating pool serves the fattest healthy key;
-    # otherwise the operator's single env key (legacy / shared fallback). `lease` is
-    # set only on the pool path, and is what lets the adapter swap keys mid-run.
+    # wins; otherwise, while sharing is on, the operator's env-configured pool
+    # (APIFY_TOKEN, APIFY_TOKEN_1..N) serves a key and rotates on exhaustion; with
+    # sharing off and no BYOK there is no key. `lease` is set only on the pool path and
+    # is what lets the adapter swap keys mid-run.
     lease = None
     if request_override_present("apify_token"):
         token = settings.effective_apify_token           # the visitor's own key
-    elif keypool.available():
-        lease = keypool.acquire()
-        token = lease.token if lease else settings.effective_apify_token
+    elif settings.shared_key:
+        lease = keypool.acquire()                         # operator keys from env
+        token = lease.token if lease else None
     else:
-        token = settings.effective_apify_token
+        token = None                                      # sharing off, no BYOK -> no key
 
     if not token:
         raise LiveRunError(
             "No Apify credit available for this run. Add your own Apify key in "
-            "Settings (it stays in your browser), or the operator can add keys to the "
-            "rotating pool (or set APIFY_TOKEN / KOLLAB_SHARED_KEY=1). The demo dataset "
-            "always runs free."
+            "Settings (it stays in your browser), or the operator can set "
+            "APIFY_TOKEN_1, APIFY_TOKEN_2, ... on the server (KOLLAB_SHARED_KEY=1). "
+            "The demo dataset always runs free."
         )
     try:
         plan = resolve_plan(preset, creators, comments)

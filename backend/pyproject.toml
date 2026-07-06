@@ -24,7 +24,6 @@ live = [
     "httpx>=0.27",
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.2",
-    "cryptography>=42",   # encrypts pool Apify tokens at rest (app.crypto / app.keypool)
 ]
 
 # Ship only the app package (a flat layout with tests/ + eval/ alongside would

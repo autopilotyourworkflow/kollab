@@ -22,8 +22,6 @@ services:
       - key: KOLLAB_SHARED_KEY
         value: "1"             # share your keys as the fallback; set 0 to require
                               #  visitors' own keys (the "I'm running low" kill switch)
-      - key: APIFY_TOKEN
-        sync: false            # legacy single operator key — optional once the pool has keys
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: GEMINI_API_KEY
@@ -31,12 +29,18 @@ services:
       - key: DATABASE_URL
         sync: false            # Neon pooled connection string — set in the dashboard
       # ── Apify key pool (auto-rotation) ──
-      # Paste several free Apify account tokens in the app's Settings page; Kollab spends
-      # the fattest healthy one and swaps automatically when it runs low. Two secrets lock
-      # it down so only the operator can manage keys and the tokens are unreadable at rest:
-      - key: KOLLAB_KEY_ENC_SECRET
-        sync: false            # encrypts pool tokens at rest — any strong passphrase; NEVER commit
-      - key: KOLLAB_ADMIN_SECRET
-        sync: false            # the admin password that gates the pool manager in Settings
+      # Set one or more Apify account tokens here; Kollab uses them in order and swaps to
+      # the next automatically when one runs low or hits Apify's usage wall. Each free
+      # Apify account carries $5/month — add as many as you want (APIFY_TOKEN_4, _5, ...).
+      - key: APIFY_TOKEN_1
+        sync: false            # set in the Render dashboard, never in the repo
+      - key: APIFY_TOKEN_2
+        sync: false
+      - key: APIFY_TOKEN_3
+        sync: false
+      - key: APIFY_TOKEN
+        sync: false            # legacy single key — still counted as one pool member if set
       - key: KOLLAB_KEY_REFRESH_MINUTES
         value: "20"            # how often the background refresher re-checks each key's balance
+      - key: KOLLAB_KEY_MIN_USD
+        value: "0.50"          # skip a key once its remaining monthly credit drops below this
