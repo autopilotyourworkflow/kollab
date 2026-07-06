@@ -8,6 +8,7 @@ import { Shortlist } from "./pages/Shortlist"
 import { NewShortlist } from "./pages/NewShortlist"
 import { PipelineRun } from "./pages/PipelineRun"
 import { Settings } from "./pages/Settings"
+import { Guide } from "./pages/Guide"
 import { DesignSystem } from "./pages/DesignSystem"
 
 const EASE_OUT_QUART = [0.25, 1, 0.5, 1] as const
@@ -40,6 +41,7 @@ function AnimatedRoutes() {
           <Route path="new" element={<NewShortlist />} />
           <Route path="run" element={<PipelineRun />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="guide" element={<Guide />} />
         </Route>
         <Route path="/design-system" element={<DesignSystem />} />
         <Route path="/system" element={<Navigate to="/design-system" replace />} />

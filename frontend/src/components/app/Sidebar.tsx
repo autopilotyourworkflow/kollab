@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Sparkles, PenLine, BarChart3, Settings, LifeBuoy, X } from "lucide-react"
+import { Sparkles, PenLine, BarChart3, KanbanSquare, Settings, LifeBuoy, X } from "lucide-react"
 import { Link } from "react-router-dom"
 import { cn } from "../../lib/cn"
 import ccLogo from "../../assets/convertcake-logo.png"
@@ -14,6 +14,7 @@ interface Tool {
 
 const tools: Tool[] = [
   { name: "Kollab", sub: "KOL matcher & vetting", icon: Sparkles, active: true },
+  { name: "Deal Pipeline", sub: "Outreach → booked → delivered", icon: KanbanSquare, soon: true },
   { name: "Ad Copy Studio", sub: "Brief → ad variants", icon: PenLine, soon: true },
   { name: "Report Builder", sub: "Client-ready decks", icon: BarChart3, soon: true },
 ]
@@ -157,7 +158,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           </div>
         </nav>
 
-        {/* Footer — Settings is live (bring-your-own-key); Help is an honest placeholder */}
+        {/* Footer — Settings (bring-your-own-key) + the operating guide */}
         <div className="border-t border-border px-3 py-3">
           <div className="flex items-center gap-1 px-1 pb-3">
             <Link
@@ -169,9 +170,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <Settings size={15} />
               <span className="text-[12px] font-medium">Settings</span>
             </Link>
-            <div className="flex cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-ink-500 opacity-50" title="Help — coming soon">
+            <Link
+              to="/app/guide"
+              onClick={onClose}
+              className="flex flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-ink-700 transition-colors hover:bg-surface hover:text-brand"
+              title="Operating guide"
+            >
               <LifeBuoy size={15} />
-            </div>
+              <span className="text-[12px] font-medium">Guide</span>
+            </Link>
           </div>
           <div className="flex items-center gap-2.5 rounded-xl bg-surface px-2.5 py-2">
             <div className="grid h-7 w-7 place-items-center rounded-full bg-brand-100 text-[11px] font-bold text-brand">
