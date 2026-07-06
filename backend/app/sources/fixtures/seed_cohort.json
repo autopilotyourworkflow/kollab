@@ -73,5 +73,10 @@
     "beauty:micro": 14,
     "beauty:mid": 12
   },
-  "pod_decoys": 5
+  "pod_decoys": 5,
+  "audience_overlap": {
+    "note": "A pool of shared commenters injected into EXACTLY TWO clean creators so the commenter-overlap dedup demonstrably fires, while staying below REUSE_MIN_CREATORS (3) so it never trips a false comment-pod flag. Both stay risk-clear.",
+    "creators": ["k1", "k7"],
+    "shared": 50
+  }
 }

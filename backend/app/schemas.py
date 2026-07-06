@@ -128,6 +128,24 @@ class Kol(CamelModel):
     checks: list[VetCheck] = []
 
 
+class OverlapPair(CamelModel):
+    """Two shortlisted creators who share a meaningful fraction of the SAME commenters —
+    booking both double-serves that slice of the budget. Deliberately COMMENTER overlap,
+    not "audience overlap": the shared count + Jaccard are measured on real commenter ids;
+    the leap to "same audience" is an inferred proxy (the engaged subset), never a
+    demographic claim. Low overlap is not proof of independence."""
+
+    a_id: str
+    a_handle: str
+    b_id: str
+    b_handle: str
+    shared: int      # raw count of shared commenter accounts (measured)
+    jaccard: float   # |A∩B| / |A∪B| over commenter sets (measured), 0-1
+    a_share: float   # shared / A's commenters — how much of A overlaps B
+    b_share: float
+    note: str        # honest framing: commenters are a proxy for audience
+
+
 class ClientBrief(CamelModel):
     brand: str
     brand_th: str
@@ -158,6 +176,8 @@ class ShortlistResponse(CamelModel):
     # Expand-run dedup: known creators skipped before any spend (0 on fresh runs
     # and in fixtures mode).
     excluded_known: int = 0
+    # Pairs of shortlisted creators who share a meaningful commenter set (dedup helper).
+    commenter_overlap: list[OverlapPair] = []
 
 
 class BrandDnaRequest(CamelModel):

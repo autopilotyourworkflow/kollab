@@ -173,6 +173,7 @@ class SeedDatasetSource(KOLSource):
 
         self._build_fillers(spec.get("cohort_fillers", {}), as_of)
         self._build_decoys(spec.get("pod_decoys", 0), as_of)
+        self._build_overlap(spec.get("audience_overlap"), as_of)
 
     # ── expansion ──────────────────────────────────────────────────────────
     def _expand(self, d: dict, as_of) -> tuple[RawKOL, Presentation]:
@@ -273,6 +274,30 @@ class SeedDatasetSource(KOLSource):
             # decoys sit in their own cohort cell so they never pollute beauty stats
             self._corpus_extra.append(RawKOL(profile=profile, videos=videos, comments=comments,
                                              vertical="_decoy", tier="_decoy"))
+
+    def _build_overlap(self, cfg: dict | None, as_of):
+        """Inject a pool of SHARED commenters into exactly the two named clean creators so
+        the commenter-overlap dedup has something real to catch. The pool spans only two
+        creators (< REUSE_MIN_CREATORS=3), so it never trips a false pod flag — both stay
+        risk-clear; it only shows up as audience overlap."""
+        if not cfg:
+            return
+        ids = cfg.get("creators", [])
+        n = int(cfg.get("shared", 0))
+        if len(ids) < 2 or n <= 0:
+            return
+        pool = [f"aud_{i:03d}" for i in range(n)]
+        targets = [k for k in self._candidates if k.profile.author_id in ids]
+        for kol in targets:
+            rng = _rng(f"overlap_{kol.profile.author_id}")
+            vurl = f"https://www.tiktok.com/{kol.profile.unique_id}/video/latest"
+            for j, uid in enumerate(pool):
+                t = as_of - timedelta(hours=rng.uniform(0, 20 * 24))
+                kol.comments.append(RawComment(
+                    cid=f"{kol.profile.author_id}_aud{j}", uid=uid, unique_id=f"@{uid}",
+                    text=_clean_text(rng), digg_count=rng.randint(0, 20), reply_comment_total=0,
+                    create_time_iso=_iso(t), video_web_url=vurl,
+                ))
 
     # ── interface ──────────────────────────────────────────────────────────
     def client_brief(self) -> ClientBrief:

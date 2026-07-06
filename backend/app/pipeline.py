@@ -12,6 +12,7 @@ from app.fraud.brand_safety import brand_safety_gate
 from app.fraud.cohort import engagement_rate, median_views
 from app.fraud.graph import get_graph_store, remember_edges
 from app.fraud.vet import _reference_now, to_checks, vet_cohort
+from app.matching.overlap import pairwise_overlap
 from app.matching.score import build_factors, fit_score
 from app.pricing.rate import rate_basis_for
 from app.raw import RawKOL, parse_iso
@@ -147,4 +148,5 @@ def build_shortlist(
         cost=estimate_cost(candidates),
         source=source.name,
         degraded=degraded,
+        commenter_overlap=pairwise_overlap(candidates),
     )
