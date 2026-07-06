@@ -1,0 +1,7 @@
+{
+  "note": "Delivered-post re-audit demo fixtures. Each entry is a creator's PAID post as if freshly scraped after they published it. 'pod_boosted' injects a comment burst + templated pod text that were NOT in the creator's organic baseline, so the re-audit catches a creator who vetted clean but bought engagement for the sponsored post. 'clean' delivers consistent with the pre-booking vet. Handles are the seed cohort's fictional handles; production re-audits the real delivered post.",
+  "posts": {
+    "@ploy.skinnote": {"followers": 38200, "median_views": 52400, "er": 7.2, "archetype": "pod_boosted"},
+    "@jinny.dermdiary": {"followers": 33100, "median_views": 61200, "er": 8.0, "archetype": "clean"}
+  }
+}

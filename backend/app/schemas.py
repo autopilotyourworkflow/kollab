@@ -180,6 +180,31 @@ class ShortlistResponse(CamelModel):
     commenter_overlap: list[OverlapPair] = []
 
 
+class DeliveredPostRequest(CamelModel):
+    """Re-audit a creator's actual DELIVERED (paid) post — catches a creator who vetted
+    clean but bought engagement for the sponsored content. Empty videos/comments -> the
+    demo loads a fixture for this handle; production passes freshly-scraped post data."""
+
+    handle: str
+    pre_authenticity: int | None = None  # the pre-booking score to diff against
+    videos: list[dict] = []              # Apify-shaped delivered-post items (optional)
+    comments: list[dict] = []
+    followers: int = 0
+
+
+class DeliveryAudit(CamelModel):
+    """The re-audit result: the delivered post run through the SAME structural detectors
+    as the pre-booking vet, diffed against it."""
+
+    handle: str
+    pre_authenticity: int | None = None
+    post_authenticity: int
+    verdict: Literal["consistent", "degraded", "cleared", "inconclusive"]
+    new_signals: list[FraudSignal] = []  # signals that fired on the delivered post
+    checks: list[VetCheck] = []          # full ledger on the delivered post
+    note: str
+
+
 class BrandDnaRequest(CamelModel):
     website: str
 

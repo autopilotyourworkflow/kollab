@@ -30,7 +30,14 @@ from app.config import (
 from app.credit import fetch_apify_credit
 from app.db import database_url, db_status, init_db
 from app.ingest import extract_brand_dna
-from app.schemas import BrandDnaRequest, BrandDnaResponse, ClientBrief, ShortlistResponse
+from app.schemas import (
+    BrandDnaRequest,
+    BrandDnaResponse,
+    ClientBrief,
+    DeliveredPostRequest,
+    DeliveryAudit,
+    ShortlistResponse,
+)
 from app.service import BadRequest, LiveRunError, run_shortlist
 from app.sources.plans import public_payload
 
@@ -340,6 +347,29 @@ def brand_dna(
         return BrandDnaResponse(
             brief=result.brief, degraded=result.degraded, source=result.source, note=result.note
         )
+
+
+@app.post("/api/re-audit", response_model=DeliveryAudit)
+def reaudit_endpoint(req: DeliveredPostRequest) -> DeliveryAudit:
+    """Re-audit a booked creator's actual DELIVERED post through the same structural
+    detectors and diff it against the pre-booking authenticity. Live delivered-post data
+    on the request is used when present; the demo loads a fixture for a seed handle. 404
+    only when neither is available."""
+    from app.fraud.reaudit import (
+        build_kol_from_request,
+        load_delivered_fixture,
+        reaudit_delivered_post,
+    )
+
+    kol = build_kol_from_request(req) or load_delivered_fixture(req.handle)
+    if kol is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No delivered-post data for {req.handle}. Pass the scraped post, or "
+                   f"re-audit one of the demo creators (e.g. @ploy.skinnote).",
+        )
+    return reaudit_delivered_post(kol, pre_authenticity=req.pre_authenticity,
+                                  graph_store=get_graph_store())
 
 
 @app.get("/")
