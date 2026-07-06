@@ -216,6 +216,23 @@ class DeliveryLogRequest(CamelModel):
     note: str | None = None
 
 
+class OutreachRequest(CamelModel):
+    kol: Kol
+    brief: ClientBrief
+
+
+class OutreachDraft(CamelModel):
+    """A first-contact message to a creator, grounded ONLY in safe (non-fraud, non-rate)
+    data points. `grounded` is True when the LLM draft passed the citation validator; False
+    for the deterministic template (no key / validation failed)."""
+
+    en: str
+    th: str
+    grounded: bool
+    source: Literal["llm", "template"]
+    note: str
+
+
 class BrandDnaRequest(CamelModel):
     website: str
 

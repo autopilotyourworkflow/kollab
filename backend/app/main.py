@@ -37,6 +37,8 @@ from app.schemas import (
     DeliveredPostRequest,
     DeliveryAudit,
     DeliveryLogRequest,
+    OutreachDraft,
+    OutreachRequest,
     ShortlistResponse,
 )
 from app.service import BadRequest, LiveRunError, run_shortlist
@@ -400,6 +402,21 @@ def list_deliveries_endpoint(handle: str = Query(...)) -> dict:
     from app.ledger import deliveries_for, reliability
 
     return {"handle": handle, "deliveries": deliveries_for(handle), "reliability": reliability(handle)}
+
+
+@app.post("/api/outreach", response_model=OutreachDraft)
+def outreach_endpoint(
+    req: OutreachRequest,
+    x_apify_token: str | None = Header(default=None),
+    x_anthropic_key: str | None = Header(default=None),
+) -> OutreachDraft:
+    """Draft a first-contact message to a creator, grounded ONLY in safe (non-fraud,
+    non-rate) data points and citation-validated. A visitor's own Claude key runs it on
+    their credit; without any key it returns a labelled deterministic template. Never 503."""
+    with _request_keys(x_apify_token, x_anthropic_key):
+        from app.matching.outreach import generate_outreach
+
+        return generate_outreach(req.kol, req.brief)
 
 
 @app.get("/")
