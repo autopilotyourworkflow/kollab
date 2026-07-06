@@ -36,6 +36,7 @@ from app.schemas import (
     ClientBrief,
     DeliveredPostRequest,
     DeliveryAudit,
+    DeliveryLogRequest,
     ShortlistResponse,
 )
 from app.service import BadRequest, LiveRunError, run_shortlist
@@ -370,6 +371,35 @@ def reaudit_endpoint(req: DeliveredPostRequest) -> DeliveryAudit:
         )
     return reaudit_delivered_post(kol, pre_authenticity=req.pre_authenticity,
                                   graph_store=get_graph_store())
+
+
+@app.post("/api/deliveries")
+def log_delivery_endpoint(req: DeliveryLogRequest) -> dict:
+    """Log a campaign outcome (projected vs actual views) and return the row + the updated
+    reliability for that creator. Needs a database (503 without one, like /api/runs)."""
+    if not database_url():
+        raise HTTPException(
+            status_code=503,
+            detail="The delivery ledger needs a database — set DATABASE_URL (Neon).",
+        )
+    from app.ledger import record_delivery, reliability
+
+    row = record_delivery(req.brand, req.handle, req.projected_views, req.actual_views, req.note)
+    return {"delivery": row, "reliability": reliability(req.handle)}
+
+
+@app.get("/api/deliveries")
+def list_deliveries_endpoint(handle: str = Query(...)) -> dict:
+    """List a creator's logged deliveries + their reliability. Empty (learning state) until
+    the first delivery is logged. Needs a database (503 without one)."""
+    if not database_url():
+        raise HTTPException(
+            status_code=503,
+            detail="The delivery ledger needs a database — set DATABASE_URL (Neon).",
+        )
+    from app.ledger import deliveries_for, reliability
+
+    return {"handle": handle, "deliveries": deliveries_for(handle), "reliability": reliability(handle)}
 
 
 @app.get("/")

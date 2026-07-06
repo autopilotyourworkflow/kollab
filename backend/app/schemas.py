@@ -205,6 +205,17 @@ class DeliveryAudit(CamelModel):
     note: str
 
 
+class DeliveryLogRequest(CamelModel):
+    """Log a campaign outcome: what a booked creator's paid post actually delivered vs the
+    reach Kollab projected at booking. The one input the closed loop learns from."""
+
+    brand: str = ""
+    handle: str
+    projected_views: int
+    actual_views: int
+    note: str | None = None
+
+
 class BrandDnaRequest(CamelModel):
     website: str
 

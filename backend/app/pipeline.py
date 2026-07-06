@@ -12,10 +12,13 @@ from app.fraud.brand_safety import brand_safety_gate
 from app.fraud.cohort import engagement_rate, median_views
 from app.fraud.graph import get_graph_store, remember_edges
 from app.fraud.vet import _reference_now, to_checks, vet_cohort
+from app.ledger import ratios_map
+from app.matching.delivery import delivery_adjustment
 from app.matching.overlap import pairwise_overlap
 from app.matching.score import build_factors, fit_score
 from app.pricing.rate import rate_basis_for
 from app.raw import RawKOL, parse_iso
+from app.store import norm_handle
 from app.schemas import (
     Avatar,
     ClientBrief,
@@ -89,6 +92,9 @@ def build_shortlist(
     # byte-identical and a DB hiccup never blocks vetting.
     graph_store = get_graph_store()
     vet_map = vet_cohort(candidates, corpus, now=now, min_n=min_n, graph_store=graph_store)
+    # Closed-loop re-rank: logged delivery outcomes nudge fit (bounded ±6). Empty (no DB
+    # or nothing logged) -> no nudge, so the seed shortlist is byte-identical.
+    delivery_map = ratios_map()
 
     kols: list[Kol] = []
     for kol in candidates:
@@ -97,6 +103,10 @@ def build_shortlist(
         last_days = _last_posted_days(kol, now)
         factors = build_factors(kol, pres, vet, last_days)
         fit = fit_score(factors)
+        d_ratios = delivery_map.get(norm_handle(kol.profile.unique_id), [])
+        if d_ratios:  # only when this creator has logged outcomes (learning state otherwise)
+            adj, _ = delivery_adjustment(d_ratios)
+            fit = max(0, min(100, fit + adj))
         why_en, why_th = _why(pres, kol, vet, fit)
         # Fair-rate estimate: the creator's own organic reach × the default CPM
         # assumption × authenticity (the UI rescales the band live as the CPM changes).
