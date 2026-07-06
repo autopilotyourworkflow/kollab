@@ -13,6 +13,7 @@ from app.fraud.cohort import engagement_rate, median_views
 from app.fraud.graph import get_graph_store, remember_edges
 from app.fraud.vet import _reference_now, to_checks, vet_cohort
 from app.matching.score import build_factors, fit_score
+from app.pricing.rate import rate_basis_for
 from app.raw import RawKOL, parse_iso
 from app.schemas import (
     Avatar,
@@ -96,6 +97,9 @@ def build_shortlist(
         factors = build_factors(kol, pres, vet, last_days)
         fit = fit_score(factors)
         why_en, why_th = _why(pres, kol, vet, fit)
+        # Fair-rate estimate: the creator's own organic reach × the default CPM
+        # assumption × authenticity (the UI rescales the band live as the CPM changes).
+        rate_basis = rate_basis_for(kol, vet.authenticity_score)
         kols.append(Kol(
             id=pres.id,
             handle=kol.profile.unique_id,
@@ -119,7 +123,8 @@ def build_shortlist(
             factors=factors,
             why_en=why_en,
             why_th=why_th,
-            est_rate_thb=None,  # only with >=2 cited Thai rate sources (locked scope)
+            est_rate_thb=rate_basis.band if rate_basis else None,
+            rate_basis=rate_basis,
             hitl=pres.hitl,
             checks=to_checks(vet.raw_signals),  # full ledger for the internal report
         ))

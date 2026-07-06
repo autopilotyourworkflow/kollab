@@ -36,6 +36,13 @@ _load_local_dotenv()
 PRICE_PER_1K_COMMENTS = 0.50   # clockworks/tiktok-comments-scraper
 PRICE_PER_1K_RESULTS = 1.70    # clockworks/tiktok-scraper
 
+# Fair-rate estimator: placeholder CPM (THB per 1,000 organic views). This is an operator
+# ASSUMPTION, editable per-creator in the UI — deliberately NOT a market rate card and NOT
+# tier/vertical-varied (that would be a fabricated benchmark; the locked scope forbids it).
+# The estimate is only ever this number applied to the creator's OWN measured organic reach,
+# discounted by authenticity. Override the default with KOLLAB_DEFAULT_CPM_THB.
+DEFAULT_CPM_THB = float(os.getenv("KOLLAB_DEFAULT_CPM_THB") or 150.0)
+
 
 # ── Bring-your-own-key: per-request credential override ──────────────────────
 # The reviewer can paste their OWN Apify / Anthropic key in the frontend Settings

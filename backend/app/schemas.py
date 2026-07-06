@@ -81,6 +81,21 @@ class RateBand(CamelModel):
     high: int
 
 
+class RateBasis(CamelModel):
+    """The full, transparent arithmetic behind a fair-rate ESTIMATE — so a band is never
+    a bare number a reviewer could mistake for a market rate card. It is the creator's OWN
+    measured organic reach × the operator's editable CPM assumption × the authenticity
+    discount. The UI rescales `band` live from these inputs as the CPM changes; every value
+    is provenance 'estimated'. Withheld (null) when the video sample is too thin to price."""
+
+    median_organic_views: int  # measured, boosted/outlier posts excluded
+    cpm_thb: float             # the OPERATOR's assumption (default; editable in the UI)
+    authenticity: int          # 0-100 discount applied to reach (bought reach isn't paid)
+    videos_sampled: int
+    band: RateBand             # the computed estimate at the current CPM
+    method: str                # human-readable arithmetic, incl. "not a market rate"
+
+
 class Kol(CamelModel):
     id: str
     handle: str
@@ -103,8 +118,11 @@ class Kol(CamelModel):
     factors: list[MatchFactor]
     why_en: str
     why_th: str
-    # Only set when grounded in >=2 cited Thai rate sources; otherwise null.
+    # Estimated fair-rate band — the creator's OWN measured organic reach × an editable
+    # CPM assumption × authenticity (see rate_basis for the arithmetic). NOT a market rate
+    # card. Null (withheld) when the video sample is too thin to price.
     est_rate_thb: RateBand | None = None
+    rate_basis: RateBasis | None = None
     hitl: HitlStatus = "pending"
     # Full vetting ledger (every check + withheld ones) for the internal report.
     checks: list[VetCheck] = []
