@@ -37,6 +37,46 @@ class RunCancelled(Exception):
     a RuntimeError, so it bypasses the live-error handling and is recorded as a clean
     'cancelled', not a failure."""
 
+
+# ── Apify quota/auth error classification (for key-pool rotation) ────────────
+# Apify signals 'this token is out of budget' at run-start via HTTP 402
+# (x402-payment-required), HTTP 403 (monthly hard-limit hit), or a usage error-type
+# slug. We detect defensively on BOTH the status code AND the error.type/message,
+# because the 403 hard-limit body isn't fully documented.
+APIFY_QUOTA_ERROR_TYPES = {
+    "x402-payment-required",
+    "not-enough-usage-to-run-paid-actor",
+    "monthly-usage-limit-too-low",
+}
+
+
+def _err_status(exc) -> int | None:
+    return getattr(exc, "status_code", None) or getattr(exc, "status", None)
+
+
+def _is_quota_error(exc) -> bool:
+    """True when Apify says the current token has no budget left."""
+    etype = (getattr(exc, "type", "") or "").lower()
+    msg = (str(getattr(exc, "message", "") or exc)).lower()
+    if _err_status(exc) in (402, 403):
+        return True
+    if etype in APIFY_QUOTA_ERROR_TYPES:
+        return True
+    return ("usage limit" in msg or "not enough" in msg
+            or "payment required" in msg or "monthly usage" in msg)
+
+
+def _is_invalid_token(exc) -> bool:
+    """True when Apify rejects the token itself (revoked / wrong)."""
+    etype = (getattr(exc, "type", "") or "").lower()
+    msg = (str(getattr(exc, "message", "") or exc)).lower()
+    return _err_status(exc) == 401 or etype == "invalid-token" or "authentication token is not valid" in msg
+
+
+def _safe_err(exc) -> str:
+    """A short error string safe to persist — the type + a truncated message, never a token."""
+    return f"{type(exc).__name__}: {str(exc)[:200]}"
+
 # Tier bands aligned with the seed cohort's labeling (k8 239K = mid, k4 486K = macro).
 TIER_MID_MIN = 100_000
 TIER_MACRO_MIN = 400_000
@@ -201,10 +241,16 @@ class ApifyAdapter(KOLSource):
                  client=None, max_creators: int = 12, videos_per_creator: int = 20,
                  comments_per_creator: int = 120, results_per_query: int = 100,
                  exclude_handles: set[str] | None = None, region: str = "TH",
-                 cancel_check=None):
+                 cancel_check=None, pool=None, initial_key_id: str | None = None):
         self.token = token
         self.budget = BudgetMeter(budget_usd)
         self._client = client
+        # Key-pool rotation: when `pool` is set, an out-of-credit error on the current
+        # key marks it exhausted and swaps to the next healthy key MID-RUN. None (the
+        # BYOK/env path) keeps the legacy single-token behavior untouched.
+        self.pool = pool
+        self._current_key_id = initial_key_id
+        self._touched_tokens: set[str] = {token} if token else set()
         self.max_creators = max_creators
         self.videos_per_creator = videos_per_creator
         self.comments_per_creator = comments_per_creator
@@ -243,12 +289,46 @@ class ApifyAdapter(KOLSource):
             ) from e
         return ApifyClient(self.token)
 
-    def _run_actor(self, client, actor_id: str, run_input: dict) -> list[dict]:
+    def _call_once(self, client, actor_id: str, run_input: dict) -> list[dict]:
         run = client.actor(actor_id).call(run_input=run_input)
         dataset_id = _dataset_id(run)
         if not dataset_id:
             return []
         return list(client.dataset(dataset_id).iterate_items())
+
+    def _run_actor(self, client, actor_id: str, run_input: dict) -> list[dict]:
+        # Legacy single-key path (no pool): behave exactly as before.
+        if self.pool is None or self._current_key_id is None:
+            return self._call_once(client, actor_id, run_input)
+
+        # Pool path: on Apify's quota/auth error, mark the offending key and transparently
+        # retry the SAME actor input on the next healthy key. fetch_candidates never sees it.
+        try:
+            from apify_client._errors import ApifyApiError as _ApifyErr  # type: ignore
+        except Exception:
+            _ApifyErr = Exception  # tests inject a fake error; prod always has apify_client
+        tried: set[str] = set()
+        while True:
+            try:
+                return self._call_once(client, actor_id, run_input)
+            except _ApifyErr as e:
+                if _is_invalid_token(e):
+                    self.pool.mark(self._current_key_id, "invalid", error=_safe_err(e))
+                elif _is_quota_error(e):
+                    self.pool.mark(self._current_key_id, "exhausted", error=_safe_err(e))
+                else:
+                    raise  # network / actor bug — not a credit problem, don't burn keys
+                tried.add(self._current_key_id)
+                lease = self.pool.acquire(exclude_ids=tried)
+                if lease is None:
+                    raise RuntimeError(
+                        "All Apify keys in the pool are exhausted or invalid. Add a fresh "
+                        "key in Settings — the run stopped before spending more."
+                    ) from e
+                self.token = lease.token
+                self._current_key_id = lease.key_id
+                self._touched_tokens.add(lease.token)
+                client = self._get_client()  # real path rebuilds on the new token; injected fake reused
 
     def _raise_if_cancelled(self) -> None:
         if self.cancel_check and self.cancel_check():

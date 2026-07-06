@@ -12,10 +12,13 @@ direct/API use.
 
 from __future__ import annotations
 
+import hmac
+import os
 from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from app import __version__
 from app.config import (
@@ -59,12 +62,59 @@ def _serve(run):
         raise HTTPException(status_code=503, detail=str(e)) from e
 
 
+def _refresh_minutes() -> int:
+    raw = os.getenv("KOLLAB_KEY_REFRESH_MINUTES", "20")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 20
+
+
+def _start_key_refresher() -> None:
+    """Proactive rotation: a daemon thread that re-polls each pool key's Apify balance
+    every KOLLAB_KEY_REFRESH_MINUTES (default 20), flipping keys active->low->exhausted
+    BEFORE a run reaches the wall. The reactive swap in ApifyAdapter is the safety net
+    between polls. No-op when the pool is disabled; never raises; never blocks startup.
+    (This in-process loop runs on Render's free tier — no paid cron service needed. It
+    also runs one refresh immediately on boot, which covers a free instance waking up.)"""
+    import threading
+
+    try:
+        from app import keypool
+
+        if not keypool.available():
+            return
+    except Exception:
+        return
+
+    interval = max(60, _refresh_minutes() * 60)
+
+    def _loop() -> None:
+        import time
+
+        while True:
+            try:
+                from app import keypool
+
+                keypool.refresh_all()
+            except Exception:
+                pass
+            time.sleep(interval)
+
+    threading.Thread(target=_loop, name="apify-key-refresher", daemon=True).start()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Create the runs table when a database is configured (idempotent). A bad/absent
-    # DATABASE_URL must never stop the seed demo from serving, so this is best-effort.
+    # Create the runs + apify_keys tables when a database is configured (idempotent). A
+    # bad/absent DATABASE_URL must never stop the seed demo from serving, so this is
+    # best-effort. Then start the background pool-balance refresher (no-op if disabled).
     try:
         init_db()
+    except Exception:
+        pass
+    try:
+        _start_key_refresher()
     except Exception:
         pass
     yield
@@ -267,6 +317,72 @@ def brand_dna(
         return BrandDnaResponse(
             brief=result.brief, degraded=result.degraded, source=result.source, note=result.note
         )
+
+
+# ── Apify key pool (operator-only, admin-gated) ─────────────────────────────
+# The operator pastes several Apify account tokens here; Kollab spends the fattest
+# healthy one and rotates automatically when it runs low. These endpoints are the ONLY
+# way to manage the pool and are gated behind KOLLAB_ADMIN_SECRET, so a visitor to the
+# public demo can run Kollab but can neither add keys nor see the account list. Tokens
+# are stored encrypted and are NEVER returned — responses carry only a masked hint +
+# balance.
+class AddKeyRequest(BaseModel):
+    token: str
+    label: str = ""
+
+
+def _require_admin(x_admin_secret: str | None) -> None:
+    """Gate pool management on the operator's admin password (constant-time compare).
+    Disabled entirely until KOLLAB_ADMIN_SECRET is set on the server."""
+    secret = (os.getenv("KOLLAB_ADMIN_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Key pool manager is off — set KOLLAB_ADMIN_SECRET on the server to enable it.",
+        )
+    if not x_admin_secret or not hmac.compare_digest(x_admin_secret, secret):
+        raise HTTPException(status_code=401, detail="Admin password required or incorrect.")
+
+
+@app.get("/api/keys")
+def list_keys(x_admin_secret: str | None = Header(default=None)) -> dict:
+    """The operator's pool: each key's masked hint, status, and balance (never the token),
+    plus a fleet summary. Admin-gated."""
+    _require_admin(x_admin_secret)
+    from app import keypool
+
+    return {"keys": keypool.list_public(), "summary": keypool.summary()}
+
+
+@app.post("/api/keys")
+def add_key_endpoint(req: AddKeyRequest, x_admin_secret: str | None = Header(default=None)) -> dict:
+    """Paste a new Apify token: validated live against Apify, balance read, stored
+    encrypted, and added to the rotation. Admin-gated. Returns the public key row."""
+    _require_admin(x_admin_secret)
+    from app import keypool
+
+    result = keypool.add_key(req.token, req.label)
+    if not result.get("ok"):
+        raise HTTPException(status_code=result.get("status", 400), detail=result.get("error", "invalid key"))
+    return result["key"]
+
+
+@app.post("/api/keys/refresh")
+def refresh_keys_endpoint(x_admin_secret: str | None = Header(default=None)) -> dict:
+    """Re-poll every pool key's Apify balance now and flip statuses. Admin-gated."""
+    _require_admin(x_admin_secret)
+    from app import keypool
+
+    return keypool.refresh_all()
+
+
+@app.delete("/api/keys/{key_id}")
+def delete_key_endpoint(key_id: str, x_admin_secret: str | None = Header(default=None)) -> dict:
+    """Remove a key from the pool. Admin-gated."""
+    _require_admin(x_admin_secret)
+    from app import keypool
+
+    return {"deleted": keypool.remove(key_id)}
 
 
 @app.get("/")

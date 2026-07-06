@@ -16,6 +16,7 @@ import {
   Lock,
 } from "lucide-react"
 import { Button } from "../components/ui/Button"
+import { KeyPool } from "../components/app/KeyPool"
 import { loadKeys, saveKeys, clearKeys, type ByoKeys } from "../lib/credentials"
 import { apiBase, fetchCredit, type CreditInfo } from "../lib/credit"
 import { cn } from "../lib/cn"
@@ -255,6 +256,11 @@ export function Settings() {
         Run Kollab on your own API credit — useful when the shared credit runs low, or if you'd rather use your own
         account. No coding required.
       </p>
+
+      {/* ── Operator Apify account pool (auto-rotation) ── */}
+      <div className="mt-7">
+        <KeyPool />
+      </div>
 
       {/* ── Bring your own keys ── */}
       <div className="mt-7 rounded-2xl border border-border bg-white p-6 shadow-sm">

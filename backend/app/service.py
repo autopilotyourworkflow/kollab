@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from app.config import get_settings
+from app import keypool
+from app.config import get_settings, request_override_present
 from app.matching.rerank import apply_llm_rerank
 from app.pipeline import build_shortlist
 from app.schemas import ClientBrief, ShortlistResponse
@@ -33,11 +34,26 @@ def make_source(preset: str | None = None, creators: int | None = None,
     settings = get_settings()
     if settings.source != "apify":
         return SeedDatasetSource()
-    if not settings.effective_apify_enabled:
+
+    # Key resolution, in precedence order: a visitor's own pasted key (BYOK) always
+    # wins; otherwise the operator's rotating pool serves the fattest healthy key;
+    # otherwise the operator's single env key (legacy / shared fallback). `lease` is
+    # set only on the pool path, and is what lets the adapter swap keys mid-run.
+    lease = None
+    if request_override_present("apify_token"):
+        token = settings.effective_apify_token           # the visitor's own key
+    elif keypool.available():
+        lease = keypool.acquire()
+        token = lease.token if lease else settings.effective_apify_token
+    else:
+        token = settings.effective_apify_token
+
+    if not token:
         raise LiveRunError(
             "No Apify credit available for this run. Add your own Apify key in "
-            "Settings (it stays in your browser), or the operator can set "
-            "APIFY_TOKEN / KOLLAB_SHARED_KEY=1. The demo dataset always runs free."
+            "Settings (it stays in your browser), or the operator can add keys to the "
+            "rotating pool (or set APIFY_TOKEN / KOLLAB_SHARED_KEY=1). The demo dataset "
+            "always runs free."
         )
     try:
         plan = resolve_plan(preset, creators, comments)
@@ -46,13 +62,17 @@ def make_source(preset: str | None = None, creators: int | None = None,
     # The user's cap can never exceed the operator's ceiling.
     cap = min(cap_usd if cap_usd is not None else plan.cap_usd, settings.run_budget_usd)
     return ApifyAdapter(
-        settings.effective_apify_token, budget_usd=cap,
+        token, budget_usd=cap,
         max_creators=plan.max_creators,
         videos_per_creator=plan.videos_per_creator,
         comments_per_creator=plan.comments_per_creator,
         results_per_query=plan.results_per_query,
         region=settings.region,
         cancel_check=cancel_check,
+        # Pool handle + starting key so the adapter can rotate mid-run on a quota error.
+        # None on the BYOK/env path → the adapter keeps its legacy single-key behavior.
+        pool=keypool if lease else None,
+        initial_key_id=lease.key_id if lease else None,
     )
 
 
