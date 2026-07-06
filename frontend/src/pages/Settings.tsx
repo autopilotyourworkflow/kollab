@@ -16,6 +16,7 @@ import {
   Lock,
 } from "lucide-react"
 import { Button } from "../components/ui/Button"
+import { GraphCard } from "../components/app/GraphCard"
 import { loadKeys, saveKeys, clearKeys, type ByoKeys } from "../lib/credentials"
 import { apiBase, fetchCredit, type CreditInfo } from "../lib/credit"
 import { cn } from "../lib/cn"
@@ -295,6 +296,12 @@ export function Settings() {
             </Button>
           )}
         </div>
+      </div>
+
+      {/* ── Fraud-recall moat: the persistent commenter graph ── */}
+      <div className="mt-5 rounded-2xl border border-border bg-white p-6 shadow-sm">
+        <h2 className="mb-3 text-[16px] font-semibold text-ink">Fraud graph</h2>
+        <GraphCard />
       </div>
 
       {/* ── Credit meter ── */}

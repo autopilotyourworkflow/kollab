@@ -28,6 +28,7 @@ import {
 } from "../lib/workspace"
 import { KolRow, COLS } from "../components/shortlist/KolRow"
 import { ExportModal } from "../components/shortlist/ExportModal"
+import { OverlapPanel } from "../components/shortlist/OverlapPanel"
 import { Button } from "../components/ui/Button"
 import { StatChip } from "../components/ui/brand"
 import type { AppContext } from "../components/app/AppShell"
@@ -327,6 +328,9 @@ export function Shortlist() {
           aria-label="Search KOLs and signals"
         />
       </div>
+
+      {/* Commenter-overlap dedup (only shows when a pair shares a meaningful audience) */}
+      <OverlapPanel pairs={entry.commenterOverlap} />
 
       {/* Toolbar */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

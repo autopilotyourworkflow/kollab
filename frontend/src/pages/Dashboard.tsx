@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { motion } from "motion/react"
 import { Plus, ShieldAlert, Users, Trash2, Layers, Clock, ArrowRight } from "lucide-react"
 import { Button } from "../components/ui/Button"
+import { GraphCard } from "../components/app/GraphCard"
 import { listShortlists, deleteEntry, counts, type ShortlistEntry } from "../lib/workspace"
 import { cn } from "../lib/cn"
 
@@ -183,6 +184,12 @@ export function Dashboard() {
           </button>
         </div>
       )}
+
+      {/* Fraud-recall moat — the proprietary commenter graph that improves every run */}
+      <div className="mt-8 rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <h2 className="mb-3 text-[14px] font-semibold text-ink">Fraud-recall moat</h2>
+        <GraphCard />
+      </div>
 
       <p className="mt-6 flex items-center gap-1.5 text-[11px] text-ink-500">
         <ShieldAlert size={12} className="text-ink-400" />
