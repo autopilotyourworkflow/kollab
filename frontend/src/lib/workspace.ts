@@ -7,8 +7,14 @@
  * creators to the same list. On first load it seeds one shortlist from the bundled
  * demo fixtures so the Dashboard is never empty. */
 
-import type { ClientBrief, HitlStatus, Kol, RiskLevel, Tier } from "./types"
-import { client as demoBrief, kols as demoKols, summary as demoSummary, cost as demoCost } from "../data/kols"
+import type { ClientBrief, HitlStatus, Kol, OverlapPair, RiskLevel, Tier } from "./types"
+import {
+  client as demoBrief,
+  kols as demoKols,
+  summary as demoSummary,
+  cost as demoCost,
+  commenterOverlap as demoOverlap,
+} from "../data/kols"
 
 export interface Decision {
   status: HitlStatus
@@ -30,6 +36,8 @@ export interface ShortlistEntry {
   runs: number
   source: "fixtures" | "api"
   cost: RunCost
+  /** Commenter-overlap pairs across this shortlist (dedup helper). */
+  commenterOverlap: OverlapPair[]
   createdAt: number
   updatedAt: number
 }
@@ -69,6 +77,7 @@ function seedEntry(): ShortlistEntry {
     runs: 1,
     source: "fixtures",
     cost: demoCost,
+    commenterOverlap: demoOverlap,
     createdAt: now,
     updatedAt: now,
   }
@@ -79,7 +88,11 @@ function read(): Workspace {
     const raw = localStorage.getItem(KEY)
     if (raw) {
       const w = JSON.parse(raw) as Workspace
-      if (Array.isArray(w?.shortlists)) return w
+      if (Array.isArray(w?.shortlists)) {
+        // migrate entries saved before commenterOverlap existed
+        for (const s of w.shortlists) if (!Array.isArray(s.commenterOverlap)) s.commenterOverlap = []
+        return w
+      }
     }
   } catch {
     /* corrupt/unavailable — fall through to a fresh seeded workspace */
@@ -110,7 +123,7 @@ export function getEntry(id: string): ShortlistEntry | null {
 export function createEntry(
   brief: ClientBrief,
   kols: Kol[],
-  opts: { source?: "fixtures" | "api"; screened?: number; cost?: RunCost } = {},
+  opts: { source?: "fixtures" | "api"; screened?: number; cost?: RunCost; commenterOverlap?: OverlapPair[] } = {},
 ): ShortlistEntry {
   const now = Date.now()
   const entry: ShortlistEntry = {
@@ -122,6 +135,7 @@ export function createEntry(
     runs: 1,
     source: opts.source ?? "fixtures",
     cost: opts.cost ?? { usd: 0, seconds: 0, cacheHitRate: 0 },
+    commenterOverlap: opts.commenterOverlap ?? [],
     createdAt: now,
     updatedAt: now,
   }
@@ -243,6 +257,20 @@ function buildPoolKol(spec: PoolSpec): Kol {
       ? `${spec.name} เหมาะกับแบรนด์ คอนเทนต์สกินแคร์ เอนเกจสุขภาพดี (ER ${spec.er}%) คะแนน ${fitScore}/100`
       : `${spec.name} ดูน่าสนใจแต่ Kollab จับสัญญาณ ${signals[0].label} ส่งให้คนรีวิว ไม่ตัดออกอัตโนมัติ`
 
+  // Fair-rate basis (same shape the backend ships) so the Economics tab is consistent
+  // for demo-added creators: measured organic reach × the default CPM × authenticity.
+  const cpm = 150
+  const disc = Math.max(0, Math.min(1, authScore / 100))
+  const point = ((medianViews * disc) / 1000) * cpm
+  const rateBasis = {
+    medianOrganicViews: medianViews,
+    cpmThb: cpm,
+    authenticity: authScore,
+    videosSampled: 20,
+    band: { low: Math.round(point * 0.8), high: Math.round(point * 1.2) },
+    method: `${medianViews.toLocaleString()} organic views/post × ฿${cpm} CPM (your assumption) × ${authScore}% authenticity — not a market rate card.`,
+  }
+
   return {
     id: `pool-${spec.handle.replace(/[^a-z0-9]/gi, "")}`,
     handle: spec.handle,
@@ -272,7 +300,8 @@ function buildPoolKol(spec: PoolSpec): Kol {
     ],
     whyEn,
     whyTh,
-    estRateThb: null,
+    estRateThb: rateBasis.band,
+    rateBasis,
     hitl: "pending",
   }
 }

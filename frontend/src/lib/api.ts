@@ -1,6 +1,20 @@
 import { useEffect, useState } from "react"
-import type { ClientBrief, Kol } from "./types"
-import { kols as fixtureKols, client as fixtureClient, summary as fixtureSummary, cost as fixtureCost } from "../data/kols"
+import type {
+  ClientBrief,
+  DeliveryAudit,
+  DeliveryReliability,
+  DeliveryRow,
+  Kol,
+  OutreachDraft,
+  OverlapPair,
+} from "./types"
+import {
+  kols as fixtureKols,
+  client as fixtureClient,
+  summary as fixtureSummary,
+  cost as fixtureCost,
+  commenterOverlap as fixtureOverlap,
+} from "../data/kols"
 import { authHeaders } from "./credentials"
 
 /** One shortlist payload, whichever source produced it. Shape == the backend's
@@ -18,6 +32,7 @@ export interface ShortlistData {
   recommended: number
   flagged: number
   cost: RunCost
+  commenterOverlap: OverlapPair[]
   source: "api" | "fixtures"
 }
 
@@ -30,6 +45,7 @@ const fixtureData: ShortlistData = {
   // backend estimate_cost() on the seed cohort (projected live-pull cost) —
   // read from the same committed payload, so it can't drift from the API.
   cost: fixtureCost,
+  commenterOverlap: fixtureOverlap,
   source: "fixtures",
 }
 
@@ -62,9 +78,11 @@ export function getShortlist(): Promise<ShortlistData> {
       const data: unknown = await res.json()
       if (!isShortlistPayload(data)) throw new Error("unexpected payload shape")
       const cost = (data as { cost?: RunCost }).cost
+      const overlap = (data as { commenterOverlap?: OverlapPair[] }).commenterOverlap
       return {
         ...data,
         cost: typeof cost?.usd === "number" ? cost : fixtureData.cost,
+        commenterOverlap: Array.isArray(overlap) ? overlap : [],
         source: "api" as const,
       }
     } catch {
@@ -174,5 +192,108 @@ export function saveBrief(b: SavedBrief): void {
     localStorage.setItem(BRIEF_KEY, JSON.stringify(b))
   } catch {
     /* storage may be unavailable; the in-page edit still worked */
+  }
+}
+
+// ── Overdelivery endpoints (all degrade gracefully with no backend) ──────────
+
+export interface GraphStats {
+  backend: string
+  durable: boolean
+  commenters: number
+  creators: number
+  edges: number
+  pods: number | null
+  topPod: { accounts: number; creators: number } | null
+  note: string
+}
+
+/** The persistent commenter-graph readout (the fraud-recall moat). Null with no backend. */
+export async function getGraph(): Promise<GraphStats | null> {
+  const base = apiBase()
+  if (!base) return null
+  try {
+    const res = await fetch(`${base}/api/graph`, { headers: authHeaders() })
+    if (!res.ok) return null
+    return (await res.json()) as GraphStats
+  } catch {
+    return null
+  }
+}
+
+/** Re-audit a creator's delivered (paid) post. Null with no backend / on failure. */
+export async function reauditPost(handle: string, preAuthenticity: number | null): Promise<DeliveryAudit | null> {
+  const base = apiBase()
+  if (!base) return null
+  try {
+    const res = await fetch(`${base}/api/re-audit`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ handle, preAuthenticity }),
+    })
+    if (!res.ok) return null
+    return (await res.json()) as DeliveryAudit
+  } catch {
+    return null
+  }
+}
+
+/** Draft outreach to a creator, grounded + citation-validated. Null with no backend. */
+export async function generateOutreach(kol: Kol, brief: ClientBrief): Promise<OutreachDraft | null> {
+  const base = apiBase()
+  if (!base) return null
+  try {
+    const res = await fetch(`${base}/api/outreach`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ kol, brief }),
+    })
+    if (!res.ok) return null
+    return (await res.json()) as OutreachDraft
+  } catch {
+    return null
+  }
+}
+
+export interface DeliveriesPayload {
+  handle: string
+  deliveries: DeliveryRow[]
+  reliability: DeliveryReliability
+}
+
+/** List a creator's logged deliveries + reliability from the backend. Null when the
+    ledger isn't available (no backend / 503 no-DB) — callers fall back to local storage. */
+export async function getDeliveries(handle: string): Promise<DeliveriesPayload | null> {
+  const base = apiBase()
+  if (!base) return null
+  try {
+    const res = await fetch(`${base}/api/deliveries?handle=${encodeURIComponent(handle)}`, { headers: authHeaders() })
+    if (!res.ok) return null
+    return (await res.json()) as DeliveriesPayload
+  } catch {
+    return null
+  }
+}
+
+/** Log a delivery outcome to the backend ledger. Null on failure (caller uses local). */
+export async function logDelivery(input: {
+  brand: string
+  handle: string
+  projectedViews: number
+  actualViews: number
+  note?: string
+}): Promise<{ delivery: DeliveryRow; reliability: DeliveryReliability } | null> {
+  const base = apiBase()
+  if (!base) return null
+  try {
+    const res = await fetch(`${base}/api/deliveries`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify(input),
+    })
+    if (!res.ok) return null
+    return (await res.json()) as { delivery: DeliveryRow; reliability: DeliveryReliability }
+  } catch {
+    return null
   }
 }

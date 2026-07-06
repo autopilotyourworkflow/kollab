@@ -1,4 +1,4 @@
-import type { ClientBrief, Kol } from "../lib/types"
+import type { ClientBrief, Kol, OverlapPair } from "../lib/types"
 import payload from "../../functions/api/shortlist.json"
 
 // ── DEMO FIXTURES = the committed pipeline output ───────────────────────────
@@ -16,11 +16,13 @@ const data = payload as unknown as {
   recommended: number
   flagged: number
   cost: { usd: number; seconds: number; cacheHitRate: number }
+  commenterOverlap?: OverlapPair[]
 }
 
 export const client: ClientBrief = data.brief
 export const kols: Kol[] = data.kols
 export const cost = data.cost
+export const commenterOverlap: OverlapPair[] = data.commenterOverlap ?? []
 
 export const summary = {
   screened: data.screened,

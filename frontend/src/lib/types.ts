@@ -28,6 +28,33 @@ export interface MatchFactor {
   rationale: string
 }
 
+/** One line of the full vetting ledger (internal report) — every detector that ran,
+    including the ones honestly WITHHELD (min-cohort rule). */
+export interface VetCheck {
+  name: string
+  label: string
+  status: "fired" | "clear" | "withheld"
+  level: RiskLevel
+  detail: string
+  measuredAgainst: string
+}
+
+export interface RateBand {
+  low: number
+  high: number
+}
+
+/** The transparent arithmetic behind a fair-rate ESTIMATE — the creator's own measured
+    organic reach × an editable CPM assumption × authenticity. Never a market rate card. */
+export interface RateBasis {
+  medianOrganicViews: number
+  cpmThb: number
+  authenticity: number
+  videosSampled: number
+  band: RateBand
+  method: string
+}
+
 export interface Kol {
   id: string
   handle: string
@@ -50,9 +77,68 @@ export interface Kol {
   factors: MatchFactor[]
   whyEn: string
   whyTh: string
-  /** Only set when grounded in ≥2 cited Thai rate sources; otherwise null. */
-  estRateThb: { low: number; high: number } | null
+  /** Estimated fair-rate band at the default CPM; null when the sample is too thin. */
+  estRateThb: RateBand | null
+  /** The inputs behind estRateThb, so the UI can rescale the band as the CPM changes. */
+  rateBasis?: RateBasis | null
+  /** Full vetting ledger for the internal report (fired / clear / withheld). */
+  checks?: VetCheck[]
   hitl: HitlStatus
+}
+
+/** Two shortlisted creators sharing a meaningful commenter set — booking both
+    double-serves that slice. Commenter overlap is measured; "audience" is an inferred proxy. */
+export interface OverlapPair {
+  aId: string
+  aHandle: string
+  bId: string
+  bHandle: string
+  shared: number
+  jaccard: number
+  aShare: number
+  bShare: number
+  note: string
+}
+
+/** Re-audit of a creator's delivered (paid) post vs the pre-booking vet. */
+export interface DeliveryAudit {
+  handle: string
+  preAuthenticity: number | null
+  postAuthenticity: number
+  verdict: "consistent" | "degraded" | "cleared" | "inconclusive"
+  newSignals: FraudSignal[]
+  checks: VetCheck[]
+  note: string
+}
+
+/** One logged campaign outcome (projected vs actual reach). */
+export interface DeliveryRow {
+  id: string
+  brand: string
+  handle: string
+  projectedViews: number
+  actualViews: number
+  ratio: number
+  note?: string | null
+  createdAt?: string | null
+}
+
+/** Aggregate reliability for a creator from their logged deliveries (learning state at n=0). */
+export interface DeliveryReliability {
+  handle: string
+  n: number
+  meanRatio: number | null
+  adjustment: number
+  note: string
+}
+
+/** A grounded, citation-validated first-contact draft. */
+export interface OutreachDraft {
+  en: string
+  th: string
+  grounded: boolean
+  source: "llm" | "template"
+  note: string
 }
 
 export interface ClientBrief {
