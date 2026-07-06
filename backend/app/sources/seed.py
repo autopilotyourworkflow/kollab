@@ -202,6 +202,11 @@ class SeedDatasetSource(KOLSource):
             video_count=200 + rng.randint(0, 300), verified=(d["tier"] in ("macro",)),
             signature=d["category"], region=d["region"],
         )
+        # Optional brand-safety probe: a real taboo phrase in one caption so the
+        # (separate-axis) brand-safety scanner has something to catch on the demo cohort.
+        probe = d.get("brand_safety_probe")
+        if probe and videos:
+            videos[0] = videos[0].model_copy(update={"text": f"{videos[0].text} {probe}"})
         kol = RawKOL(profile=profile, videos=videos, comments=comments,
                      vertical=d["vertical"], tier=d["tier"])
         pres = Presentation(

@@ -8,6 +8,7 @@ zero credentials on SeedDatasetSource; the same code path serves the ApifyAdapte
 from __future__ import annotations
 
 from app.config import PRICE_PER_1K_COMMENTS, PRICE_PER_1K_RESULTS
+from app.fraud.brand_safety import brand_safety_gate
 from app.fraud.cohort import engagement_rate, median_views
 from app.fraud.graph import get_graph_store, remember_edges
 from app.fraud.vet import _reference_now, vet_cohort
@@ -110,7 +111,10 @@ def build_shortlist(
             last_posted_days_ago=last_days,
             fit_score=fit,
             risk=vet.risk,
-            brand_safety=Gate(status=pres.brand_safety_status, note=pres.brand_safety_note),
+            # Brand safety is a SEPARATE axis from fraud risk: scan the creator's own
+            # captions/bio against the taboo lexicon and merge with the descriptor. A
+            # flag here routes to human review and never changes risk.level / counts.
+            brand_safety=brand_safety_gate(kol, pres.brand_safety_status, pres.brand_safety_note),
             conflict=Gate(status=pres.conflict_status, note=pres.conflict_note),
             factors=factors,
             why_en=why_en,
