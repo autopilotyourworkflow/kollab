@@ -65,9 +65,12 @@ def init_db() -> bool:
 
 def reset_db_cache() -> None:
     """Drop cached engine + sessionmaker (so a changed DATABASE_URL is picked up).
-    Test-only in practice."""
+    Test-only in practice. Also drops the auth signing-secret cache, which is derived
+    from DATABASE_URL."""
     get_engine.cache_clear()
     get_sessionmaker.cache_clear()
+    from app.auth import reset_auth_cache  # local import: avoid an import cycle
+    reset_auth_cache()
 
 
 def db_status() -> dict:
