@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Sparkles, PenLine, BarChart3, KanbanSquare, Settings, LifeBuoy, X } from "lucide-react"
+import { Sparkles, Settings, LifeBuoy, X } from "lucide-react"
 import { Link } from "react-router-dom"
 import { cn } from "../../lib/cn"
 import ccLogo from "../../assets/convertcake-logo.png"
@@ -14,9 +14,6 @@ interface Tool {
 
 const tools: Tool[] = [
   { name: "Kollab", sub: "KOL matcher & vetting", icon: Sparkles, active: true },
-  { name: "Deal Pipeline", sub: "Outreach → booked → delivered", icon: KanbanSquare, soon: true },
-  { name: "Ad Copy Studio", sub: "Brief → ad variants", icon: PenLine, soon: true },
-  { name: "Report Builder", sub: "Client-ready decks", icon: BarChart3, soon: true },
 ]
 
 function ToolItem({ tool, onNavigate }: { tool: Tool; onNavigate: () => void }) {
