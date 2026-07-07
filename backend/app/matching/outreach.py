@@ -1,5 +1,5 @@
-"""Grounded, citation-validated OUTREACH draft — the second application of the rerank
-rigor flex (matching/rerank.py), now aimed at a message SENT to the creator.
+"""Grounded, citation-validated OUTREACH draft — the second application of the rerank's
+citation-validation approach (matching/rerank.py), now aimed at a message SENT to the creator.
 
 Two honesty guarantees:
   1. SAFE ALLOWLIST. The model may only cite a subset of `datapoints_for_kol` — the
