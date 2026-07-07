@@ -250,6 +250,10 @@ class LoginRequest(CamelModel):
 
 class BrandDnaRequest(CamelModel):
     website: str
+    # Optional pre-read page text (the paste box / the browser bookmarklet — a real
+    # browser reads sites a datacenter fetch can't). When present, extraction reads this
+    # directly and skips the server-side fetch.
+    text: str | None = None
 
 
 class BrandDnaResponse(CamelModel):

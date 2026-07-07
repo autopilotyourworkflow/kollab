@@ -91,7 +91,7 @@ def test_brand_dna_endpoint_degrades_honestly(monkeypatch):
 
     monkeypatch.setattr(
         main_mod, "extract_brand_dna",
-        lambda url: real_extract(url, fetch_text=lambda u: (_ for _ in ()).throw(ConnectionError("offline"))),
+        lambda url, text=None: real_extract(url, text=text, fetch_text=lambda u: (_ for _ in ()).throw(ConnectionError("offline"))),
     )
     r = client.post("/api/brand-dna", json={"website": "glowlab.co.th"})
     assert r.status_code == 200

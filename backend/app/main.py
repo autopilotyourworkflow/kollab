@@ -367,7 +367,7 @@ def brand_dna(
     visitor's own Claude key (X-Anthropic-Key header, from Settings) runs the
     extraction on their credit; without any key it returns the labeled skeleton."""
     with _request_keys(x_apify_token, x_anthropic_key):
-        result = extract_brand_dna(req.website)
+        result = extract_brand_dna(req.website, text=req.text)
         return BrandDnaResponse(
             brief=result.brief, degraded=result.degraded, source=result.source, note=result.note
         )

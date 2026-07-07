@@ -13,6 +13,7 @@ import {
   ChevronDown,
   AlertTriangle,
   RotateCcw,
+  Bookmark,
 } from "lucide-react"
 import { Button } from "../components/ui/Button"
 import { ProvenanceChip } from "../components/ui/ProvenanceChip"
@@ -40,7 +41,7 @@ type LiveExtraction = { brand: string; brandTh: string; category: string; source
 /** Try the real Brand-DNA endpoint (Claude → Gemini on the backend). Returns null
     when there is no live backend, the call fails, or the backend answered with the
     honestly-degraded rules skeleton — the UI then keeps its labeled demo path. */
-async function tryLiveBrandDna(website: string): Promise<{
+async function tryLiveBrandDna(website: string, text?: string): Promise<{
   live: LiveExtraction | null
   brief?: { audience?: string; region?: string; pillars?: string[] }
 }> {
@@ -50,11 +51,13 @@ async function tryLiveBrandDna(website: string): Promise<{
   if (!base) return { live: null }
   try {
     const ctrl = new AbortController()
-    const t = window.setTimeout(() => ctrl.abort(), 12_000)
+    // Supplied text (paste box / bookmarklet) is fast; a URL may need the server's
+    // reader fallback (r.jina.ai renders JS), so give that path more headroom.
+    const t = window.setTimeout(() => ctrl.abort(), text ? 15_000 : 25_000)
     const res = await fetch(`${base}/api/brand-dna`, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ website }),
+      body: JSON.stringify(text ? { website, text } : { website }),
       signal: ctrl.signal,
     })
     window.clearTimeout(t)
@@ -115,6 +118,18 @@ export function NewShortlist() {
   // it did NOT run out of keys.
   const wired = !!apiBase()
 
+  // Paste box + bookmarklet (offered when a site can't be auto-read): a real browser reads
+  // sites a datacenter fetch can't. The bookmarklet grabs the rendered page text and reopens
+  // this page with it in the hash; the href is built from the current origin.
+  const [pasteText, setPasteText] = useState("")
+  const bookmarkletHref =
+    "javascript:(function(){" +
+    "var t=(document.body.innerText||'').replace(/\\s+/g,' ').slice(0,12000);" +
+    "var p=encodeURIComponent(JSON.stringify({url:location.href,text:t}));" +
+    "location.href=" +
+    JSON.stringify((typeof window !== "undefined" ? window.location.origin : "") + "/app/new#brand=") +
+    "+p;})()"
+
   // editable brand DNA (HITL on the brief)
   const [audience, setAudience] = useState(client.audience)
   const [tone, setTone] = useState(brandDna.tone)
@@ -170,31 +185,51 @@ export function NewShortlist() {
     ? "Custom depth — quality follows the volumes you choose; cohort stats withhold below n=15 regardless (the rule is not configurable)."
     : plans.presets.find((p) => p.key === planKey)?.note ?? ""
 
-  const analyze = async () => {
-    const cleaned = url.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "")
-    if (!/^([\w-]+\.)+[a-z]{2,}(\/.*)?$/i.test(cleaned)) {
+  const runExtraction = async (targetUrl: string, textOverride?: string) => {
+    const cleaned = targetUrl.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "")
+    // Supplied text (paste / bookmarklet) doesn't need a valid URL; a plain run does.
+    if (!textOverride && !/^([\w-]+\.)+[a-z]{2,}(\/.*)?$/i.test(cleaned)) {
       setError("Enter a valid website — e.g. glowlab.co.th")
       return
     }
     setError(null)
+    setUrl(cleaned)
     setPhase("analyzing")
     const willFail = /fail|error|unreachable|broken/i.test(cleaned)
     const startedAt = Date.now()
 
-    // Real extraction first (live backend + LLM key); the labeled demo path
-    // takes over on any miss — never a fake green badge.
-    const result = await tryLiveBrandDna(cleaned)
+    // Real extraction (live backend + LLM key): direct fetch → reader fallback, or the
+    // supplied text. The labeled draft takes over on any miss — never a fake green badge.
+    const result = await tryLiveBrandDna(cleaned, textOverride)
     setLive(result.live)
     if (result.live && result.brief) {
       if (result.brief.audience) setAudience(result.brief.audience)
       if (result.brief.region) setRegion(result.brief.region)
       if (result.brief.pillars?.length) setPillars(result.brief.pillars)
     }
+    if (result.live) setPasteText("")
 
     // keep the reading state legible even when the answer is instant
     const waitLeft = Math.max(300, 1700 - (Date.now() - startedAt))
     window.setTimeout(() => setPhase(willFail && !result.live ? "error" : "review"), waitLeft)
   }
+  const analyze = () => runExtraction(url)
+
+  // Bookmarklet payload arrives in the hash (#brand=<{url,text}>) — a real browser read the
+  // page for us. Extract from it, then clear the hash so a refresh doesn't re-fire.
+  useEffect(() => {
+    const m = window.location.hash.match(/[#&]brand=([^&]+)/)
+    if (!m) return
+    try {
+      const payload = JSON.parse(decodeURIComponent(m[1])) as { url?: string; text?: string }
+      history.replaceState(null, "", window.location.pathname + window.location.search)
+      if (payload.text && payload.text.trim()) void runExtraction(payload.url || "", payload.text)
+      else if (payload.url) setUrl(payload.url.replace(/^https?:\/\//i, "").replace(/\/+$/, ""))
+    } catch {
+      /* malformed hash — ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
@@ -383,6 +418,45 @@ export function NewShortlist() {
                   </>
                 )}
               </p>
+            </div>
+          )}
+
+          {wired && !live && !known && (
+            <div className="mt-3 rounded-lg border border-border bg-surface px-3.5 py-3">
+              <div className="text-[12px] font-semibold text-ink">Read it another way</div>
+              <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-500">
+                Paste the page's text below, or grab it from your own browser with the bookmarklet — a real browser
+                reads sites a server can't.
+              </p>
+              <textarea
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder="Paste the brand page's text here…"
+                rows={3}
+                className="mt-2 w-full resize-none rounded-lg border border-border-strong bg-white px-3 py-2 text-[13px] text-ink shadow-xs placeholder:text-ink-500 focus:border-brand-300"
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => pasteText.trim() && runExtraction(url, pasteText.trim())}
+                  disabled={!pasteText.trim()}
+                  leadingIcon={<Sparkles size={14} />}
+                >
+                  Extract from pasted text
+                </Button>
+                <a
+                  ref={(el) => {
+                    if (el) el.setAttribute("href", bookmarkletHref)
+                  }}
+                  onClick={(e) => e.preventDefault()}
+                  draggable
+                  title="Drag me to your bookmarks bar, then click me while viewing a brand's website"
+                  className="inline-flex cursor-grab items-center gap-1.5 rounded-md border border-dashed border-border-strong px-2.5 py-1.5 text-[12px] font-medium text-ink-700 transition-colors hover:border-brand-300 hover:text-brand"
+                >
+                  <Bookmark size={13} /> Kollab bookmarklet
+                </a>
+                <span className="text-[11px] text-ink-400">drag to bookmarks → click on the brand's site</span>
+              </div>
             </div>
           )}
 

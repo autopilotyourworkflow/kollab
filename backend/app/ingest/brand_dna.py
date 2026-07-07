@@ -93,6 +93,51 @@ def _fetch_site_text(url: str) -> str:
     return text[:MAX_SITE_CHARS]
 
 
+READER_TIMEOUT_S = 30.0
+READER_MIN_CHARS = 200  # below this the direct read is too thin — try the reader
+
+
+def _fetch_via_reader(url: str) -> str:
+    """Fallback fetch through Jina Reader (r.jina.ai): it renders JS and fetches from its
+    own good-reputation IPs, so it reads sites that block or JS-gate a plain server-side
+    request from a datacenter — the common failure. No key needed; an optional
+    JINA_API_KEY lifts the free rate limit. Returns clean, whitespace-collapsed text."""
+    import os
+
+    import httpx  # lazy: live-path dependency only
+
+    headers = {"X-Return-Format": "text"}
+    key = os.getenv("JINA_API_KEY")
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    r = httpx.get(
+        f"https://r.jina.ai/{_normalize_url(url)}",
+        headers=headers,
+        timeout=READER_TIMEOUT_S,
+        follow_redirects=True,
+    )
+    r.raise_for_status()
+    return re.sub(r"\s+", " ", r.text).strip()[:MAX_SITE_CHARS]
+
+
+def _read_site(url: str, fetch_text: Callable[[str], str] | None) -> str:
+    """Read a site's text: a fast direct request first, then — only on the real path (no
+    injected fetcher) — the Jina reader when the direct read is blocked or too thin. Each
+    tier is best-effort; a total miss returns '' and the caller degrades honestly."""
+    try:
+        direct = ((fetch_text or _fetch_site_text)(url) or "").strip()
+    except Exception:
+        direct = ""
+    # Injected fetcher (tests) -> never hit the network; a rich direct read -> use it.
+    if fetch_text is not None or len(direct) >= READER_MIN_CHARS:
+        return direct
+    try:
+        reader = _fetch_via_reader(url)
+    except Exception:
+        reader = ""
+    return reader if len(reader) > len(direct) else direct
+
+
 def _parse_brief_json(raw: str, website: str) -> ClientBrief:
     """Validate an LLM response into ClientBrief. Raises on any shape violation —
     the caller degrades to the next tier instead of shipping a malformed brief."""
@@ -135,20 +180,24 @@ class BrandDnaResult:
 
 def extract_brand_dna(
     url: str,
+    text: str | None = None,
     fetch_text: Callable[[str], str] | None = None,
     claude_call: Callable[[str], str] | None = None,
     gemini_call: Callable[[str], str] | None = None,
 ) -> BrandDnaResult:
+    """Extract a brief from a client's website, or from `text` supplied directly (the paste
+    box / the browser bookmarklet — a real browser reads sites a datacenter fetch can't).
+    Fetch chain when no text is given: direct request -> Jina reader -> rules skeleton."""
     settings = get_settings()
 
-    try:
-        text = (fetch_text or _fetch_site_text)(url)
-    except Exception as e:  # unreachable site -> honest degraded skeleton
-        return BrandDnaResult(rules_skeleton(url), True, "rules", f"site fetch failed: {e}")
-    if not text.strip():
-        return BrandDnaResult(rules_skeleton(url), True, "rules", "site returned no readable text")
+    page_text = (text or "").strip()[:MAX_SITE_CHARS] if text and text.strip() else _read_site(url, fetch_text)
+    if not page_text.strip():
+        return BrandDnaResult(
+            rules_skeleton(url), True, "rules",
+            "site returned no readable text — paste the page's text or use the Kollab bookmarklet",
+        )
 
-    prompt = _PROMPT.format(url=url, text=text)
+    prompt = _PROMPT.format(url=url, text=page_text)
     notes: list[str] = []
     tiers: list[tuple[str, Callable[[str], str] | None]] = [
         ("claude", claude_call or (claude_text if settings.effective_anthropic_api_key else None)),

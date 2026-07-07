@@ -262,7 +262,26 @@ def test_brand_dna_degrades_when_site_unreachable():
 
     r = extract_brand_dna("nonexistent.example", fetch_text=dead,
                           claude_call=lambda p: _GOOD_BRIEF_JSON)
-    assert r.source == "rules" and r.degraded is True and "fetch failed" in r.note
+    assert r.source == "rules" and r.degraded is True
+    assert "no readable text" in r.note or "paste" in r.note
+
+
+def test_brand_dna_from_supplied_text_skips_the_fetch():
+    # The paste box / bookmarklet supply already-rendered text — extraction uses it
+    # directly and never fetches (so it works on sites a server can't read).
+    fetched = {"hit": False}
+
+    def should_not_fetch(url):
+        fetched["hit"] = True
+        return ""
+
+    r = extract_brand_dna(
+        "srichand.co.th",
+        text="Srichand is a Thai heritage cosmetics brand — translucent powder, herbal skincare.",
+        fetch_text=should_not_fetch, claude_call=lambda p: _GOOD_BRIEF_JSON,
+    )
+    assert r.source == "claude" and r.degraded is False
+    assert fetched["hit"] is False
 
 
 # ── citation-validated rerank ────────────────────────────────────────────────
