@@ -157,6 +157,7 @@ class ClientBrief(CamelModel):
     pillars: list[str]
     region: str
     website: str
+    tone: str = ""  # brand voice, inferred from the site copy (advisory; may be "")
 
 
 class CostMeter(CamelModel):

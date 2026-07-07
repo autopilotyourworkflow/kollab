@@ -35,6 +35,7 @@ Return STRICT JSON only (no prose, no code fence) with exactly these keys:
   "brandTh"  — the Thai rendering of the brand name if present on the page, else ""
   "category" — one short line: product category / positioning
   "audience" — one short line describing the target customer, grounded in the page
+  "tone"     — one short line describing the brand's tone / voice, inferred from the copy
   "pillars"  — array of 3-5 short content-pillar strings grounded in the page
   "region"   — geographic focus if stated, else ""
   "website"  — "{url}"
@@ -149,6 +150,7 @@ def _parse_brief_json(raw: str, website: str) -> ClientBrief:
     data.setdefault("website", website)
     data.setdefault("brandTh", "")
     data.setdefault("region", "")
+    data.setdefault("tone", "")
     return ClientBrief.model_validate(data)
 
 

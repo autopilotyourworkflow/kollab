@@ -43,7 +43,7 @@ type LiveExtraction = { brand: string; brandTh: string; category: string; source
     honestly-degraded rules skeleton — the UI then keeps its labeled demo path. */
 async function tryLiveBrandDna(website: string, text?: string): Promise<{
   live: LiveExtraction | null
-  brief?: { audience?: string; region?: string; pillars?: string[] }
+  brief?: { audience?: string; region?: string; pillars?: string[]; tone?: string }
 }> {
   // Only when a live backend is configured — the static demo hosting has no
   // /api/brand-dna, so probing it would just log 404 noise.
@@ -65,7 +65,7 @@ async function tryLiveBrandDna(website: string, text?: string): Promise<{
     const data = (await res.json()) as {
       degraded?: boolean
       source?: string
-      brief?: { brand?: string; brandTh?: string; category?: string; audience?: string; region?: string; pillars?: string[] }
+      brief?: { brand?: string; brandTh?: string; category?: string; audience?: string; region?: string; pillars?: string[]; tone?: string }
     }
     if (data?.degraded === false && typeof data.brief?.brand === "string" && data.brief.brand) {
       return {
@@ -139,6 +139,22 @@ export function NewShortlist() {
   const [pillarDraft, setPillarDraft] = useState("")
   const addPillarRef = useRef<HTMLButtonElement>(null)
 
+  // Brand-safety no-go: the AM's own exclusions, not scraped from the site. Starts at the
+  // demo default for the fixtures brand; a live extraction clears it (nothing hardcoded is
+  // ever shown as if it were read from the brand).
+  const [noGo, setNoGo] = useState<string[]>(brandDna.noGo)
+  const [addingNoGo, setAddingNoGo] = useState(false)
+  const [noGoDraft, setNoGoDraft] = useState("")
+  const addNoGoRef = useRef<HTMLButtonElement>(null)
+
+  const commitNoGo = () => {
+    const n = noGoDraft.trim()
+    if (n && !noGo.some((x) => x.toLowerCase() === n.toLowerCase())) setNoGo((xs) => [...xs, n])
+    setNoGoDraft("")
+    setAddingNoGo(false)
+    requestAnimationFrame(() => addNoGoRef.current?.focus())
+  }
+
   const commitPillar = () => {
     const p = pillarDraft.trim()
     if (p && !pillars.some((x) => x.toLowerCase() === p.toLowerCase())) {
@@ -206,8 +222,12 @@ export function NewShortlist() {
       if (result.brief.audience) setAudience(result.brief.audience)
       if (result.brief.region) setRegion(result.brief.region)
       if (result.brief.pillars?.length) setPillars(result.brief.pillars)
+      setTone(result.brief.tone || "") // extracted tone (or clear the demo default on a live brand)
     }
-    if (result.live) setPasteText("")
+    if (result.live) {
+      setNoGo([]) // the no-go list is the AM's call, not scraped — start empty on a live brand
+      setPasteText("")
+    }
 
     // keep the reading state legible even when the answer is instant
     const waitLeft = Math.max(300, 1700 - (Date.now() - startedAt))
@@ -486,7 +506,9 @@ export function NewShortlist() {
                   onChange={(e) => setTone(e.target.value)}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-[14px] text-ink focus:border-brand-300 focus:bg-white"
                 />
-                <p className="font-thai mt-1 text-[13px] text-ink-500">{brandDna.toneTh}</p>
+                {tone === brandDna.tone && (
+                  <p className="font-thai mt-1 text-[13px] text-ink-500">{brandDna.toneTh}</p>
+                )}
               </Field>
               <Field label="Region focus" provenance="measured">
                 <input
@@ -559,16 +581,68 @@ export function NewShortlist() {
             </Field>
 
             <Field label="Brand-safety no-go">
-              <div className="flex flex-wrap gap-2">
-                {brandDna.noGo.map((n) => (
+              <div className="flex flex-wrap items-center gap-2">
+                {noGo.map((n) => (
                   <span
                     key={n}
-                    className="inline-flex items-center rounded-full border border-risk-med-border bg-risk-med-bg px-2.5 py-1 text-[12px] font-medium text-risk-med-fg"
+                    className="group inline-flex items-center gap-1.5 rounded-full border border-risk-med-border bg-risk-med-bg py-1 pl-3 pr-2 text-[12px] font-medium text-risk-med-fg"
                   >
                     {n}
+                    <button
+                      onClick={() => {
+                        setNoGo((xs) => xs.filter((x) => x !== n))
+                        requestAnimationFrame(() => addNoGoRef.current?.focus())
+                      }}
+                      className="-my-1 grid h-6 w-6 place-items-center rounded-full text-risk-med-fg/60 hover:bg-risk-med-border hover:text-risk-med-fg"
+                      aria-label={`Remove ${n}`}
+                    >
+                      <X size={12} />
+                    </button>
                   </span>
                 ))}
+                {addingNoGo ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-risk-med-border bg-white py-0.5 pl-3 pr-1">
+                    <input
+                      autoFocus
+                      value={noGoDraft}
+                      onChange={(e) => setNoGoDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitNoGo()
+                        if (e.key === "Escape") {
+                          setNoGoDraft("")
+                          setAddingNoGo(false)
+                          requestAnimationFrame(() => addNoGoRef.current?.focus())
+                        }
+                      }}
+                      onBlur={commitNoGo}
+                      placeholder="e.g. gambling promos…"
+                      className="w-40 bg-transparent text-[12px] font-medium text-ink outline-none placeholder:text-ink-500"
+                      aria-label="New brand-safety exclusion"
+                    />
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={commitNoGo}
+                      className="grid h-6 w-6 place-items-center rounded-full bg-risk-med-bg text-risk-med-fg hover:bg-risk-med-border"
+                      aria-label="Add exclusion"
+                    >
+                      <Plus size={13} />
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    ref={addNoGoRef}
+                    onClick={() => setAddingNoGo(true)}
+                    className="inline-flex min-h-[28px] items-center gap-1 rounded-full border border-dashed border-border-strong px-2.5 py-1 text-[12px] font-medium text-ink-500 transition-colors duration-200 hover:border-brand-300 hover:text-brand"
+                  >
+                    <Plus size={13} /> Add
+                  </button>
+                )}
               </div>
+              {noGo.length === 0 && !addingNoGo && (
+                <p className="mt-1.5 text-[11px] text-ink-400">
+                  Your call — add any content, claims, or verticals this brand won't be associated with.
+                </p>
+              )}
             </Field>
           </div>
 
