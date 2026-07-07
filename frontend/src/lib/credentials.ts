@@ -55,5 +55,13 @@ export function authHeaders(): Record<string, string> {
   const h: Record<string, string> = {}
   if (apify) h["X-Apify-Token"] = apify
   if (anthropic) h["X-Anthropic-Key"] = anthropic
+  // The account session token (read inline to avoid an import cycle with lib/auth ->
+  // lib/credit -> lib/credentials). Authenticates every existing fetch site for free.
+  try {
+    const t = localStorage.getItem("kollab-auth")
+    if (t) h["Authorization"] = `Bearer ${t}`
+  } catch {
+    /* storage unavailable */
+  }
   return h
 }

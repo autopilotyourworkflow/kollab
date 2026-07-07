@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 import { MotionConfig, motion } from "motion/react"
+import { Loader2 } from "lucide-react"
 import { Landing } from "./pages/Landing"
 import { AppShell } from "./components/app/AppShell"
 import { Dashboard } from "./pages/Dashboard"
@@ -10,8 +11,25 @@ import { PipelineRun } from "./pages/PipelineRun"
 import { Settings } from "./pages/Settings"
 import { Guide } from "./pages/Guide"
 import { DesignSystem } from "./pages/DesignSystem"
+import { AuthProvider, useAuth } from "./context/AuthContext"
+import { AuthGate } from "./pages/AuthGate"
 
 const EASE_OUT_QUART = [0.25, 1, 0.5, 1] as const
+
+/** Gate the app: in API mode, an unauthenticated visitor gets the sign-in / demo gate.
+    In local mode (no backend) the workspace runs offline exactly as before — no gate. */
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const { user, loading, mode } = useAuth()
+  if (mode === "api" && loading) {
+    return (
+      <div className="grid min-h-svh place-items-center bg-surface">
+        <Loader2 size={26} className="animate-spin text-brand" />
+      </div>
+    )
+  }
+  if (mode === "api" && !user) return <AuthGate />
+  return <>{children}</>
+}
 
 /** Fade-in between top-level surfaces (landing ↔ app ↔ design-system).
     ENTER-ONLY on purpose: exit choreography via AnimatePresence mode="wait"
@@ -34,7 +52,14 @@ function AnimatedRoutes() {
     >
       <Routes location={location}>
         <Route path="/" element={<Landing />} />
-        <Route path="/app" element={<AppShell />}>
+        <Route
+          path="/app"
+          element={
+            <RequireAuth>
+              <AppShell />
+            </RequireAuth>
+          }
+        >
           <Route index element={<Dashboard />} />
           <Route path="shortlist" element={<Navigate to="/app" replace />} />
           <Route path="s/:id" element={<Shortlist />} />
@@ -56,7 +81,9 @@ export function App() {
     <BrowserRouter>
       {/* reducedMotion="user": every motion/react animation respects the OS setting */}
       <MotionConfig reducedMotion="user">
-        <AnimatedRoutes />
+        <AuthProvider>
+          <AnimatedRoutes />
+        </AuthProvider>
       </MotionConfig>
     </BrowserRouter>
   )
