@@ -242,6 +242,9 @@ export function Landing() {
             <a href="#how" className="transition-colors duration-300 hover:text-brand">
               How it works
             </a>
+            <Link to="/tech" className="transition-colors duration-300 hover:text-brand">
+              Engineering
+            </Link>
             <Link to="/design-system" className="transition-colors duration-300 hover:text-brand">
               Design system
             </Link>
