@@ -77,6 +77,15 @@ def make_source(preset: str | None = None, creators: int | None = None,
     )
 
 
+def demo_shortlist() -> ShortlistResponse:
+    """The always-on demo shortlist (Glow Lab) on curated fixtures — deterministic and
+    free, INDEPENDENT of KOLLAB_SOURCE. GET /api/shortlist serves this: a live source has
+    no default brief (real runs go through POST /api/shortlist or the async /api/runs
+    path), so the demo must always use the seed. The LLM rerank is a live-run enhancement,
+    so the demo stays deterministic and makes no per-request LLM call."""
+    return build_shortlist(SeedDatasetSource())
+
+
 def run_shortlist(brief: ClientBrief | None, preset: str | None = None,
                   creators: int | None = None, comments: int | None = None,
                   cap_usd: float | None = None, expand: bool = False,

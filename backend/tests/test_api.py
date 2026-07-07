@@ -44,23 +44,32 @@ def test_flagged_kol_present():
     assert "Comment pod" in labels and "Bought followers" in labels
 
 
-def test_apify_source_without_token_answers_503(monkeypatch):
-    # Selecting the live source without its credential must yield an honest 503
-    # with the reason, never an unhandled 500 or a silently faked result.
+_BRIEF = {
+    "brand": "Glow Lab", "brandTh": "", "category": "Skincare",
+    "audience": "Thai women", "pillars": ["Ingredient education"],
+    "region": "Nationwide", "website": "glowlab.co.th",
+}
+
+
+def test_apify_live_path_without_token_answers_503(monkeypatch):
+    # Selecting the live source without any credential must yield an honest 503 on the
+    # LIVE path (POST a brief), never an unhandled 500 or a silently faked result.
     monkeypatch.setenv("KOLLAB_SOURCE", "apify")
-    monkeypatch.delenv("APIFY_TOKEN", raising=False)
-    r = client.get("/api/shortlist")
+    monkeypatch.setenv("KOLLAB_SHARED_KEY", "0")  # sharing off + no BYOK -> no key -> honest 503
+    r = client.post("/api/shortlist", json=_BRIEF)
     assert r.status_code == 503
     assert "APIFY_TOKEN" in r.json()["detail"]
 
 
-def test_apify_source_get_without_brief_answers_400(monkeypatch):
-    # GET has no brief and a live source carries no default one -> honest 400.
+def test_get_shortlist_is_seed_backed_even_under_apify(monkeypatch):
+    # GET /api/shortlist is the always-on demo (Glow Lab, curated fixtures): it must stay
+    # seed-backed and 200 even when the live source is selected — it never depends on a
+    # brief or a live token. (Real runs go through POST / the async /api/runs path.)
     monkeypatch.setenv("KOLLAB_SOURCE", "apify")
     monkeypatch.setenv("APIFY_TOKEN", "dummy")
     r = client.get("/api/shortlist")
-    assert r.status_code == 400
-    assert "brief" in r.json()["detail"].lower()
+    assert r.status_code == 200
+    assert r.json()["kols"], "demo shortlist should carry creators"
 
 
 def test_expand_params_are_a_noop_on_the_seed_source():

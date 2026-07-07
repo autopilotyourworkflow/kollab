@@ -51,7 +51,7 @@ from app.schemas import (
     ShortlistResponse,
     SignupRequest,
 )
-from app.service import BadRequest, LiveRunError, run_shortlist
+from app.service import BadRequest, LiveRunError, demo_shortlist, run_shortlist
 from app.sources.plans import public_payload
 
 
@@ -257,8 +257,9 @@ def credit(
 
 @app.get("/api/shortlist", response_model=ShortlistResponse)
 def get_shortlist() -> ShortlistResponse:
-    """The default demo shortlist (Glow Lab) on curated fixtures."""
-    return _serve(lambda: run_shortlist(None))
+    """The default demo shortlist (Glow Lab) on curated fixtures — always seed-backed,
+    independent of KOLLAB_SOURCE (a live source has no default brief; use POST)."""
+    return _serve(demo_shortlist)
 
 
 @app.post("/api/shortlist", response_model=ShortlistResponse)
