@@ -15,9 +15,10 @@ def client(tmp_path, monkeypatch):
     reset_db_cache()
     from app.db import init_db
     init_db()
+    import app.main as main_mod
+    main_mod._rl_buckets.clear()  # fresh per-IP rate-limit state each test
     from fastapi.testclient import TestClient
-    from app.main import app
-    yield TestClient(app)
+    yield TestClient(main_mod.app)
     reset_db_cache()
 
 
@@ -39,7 +40,8 @@ def test_signup_returns_token_and_user(client):
 
 def test_signup_validation(client):
     assert client.post("/api/auth/signup", json={"email": "notanemail", "password": "supersecret"}).status_code == 400
-    assert client.post("/api/auth/signup", json={"email": "a@b.com", "password": "short"}).status_code == 400
+    # a too-short password is rejected at schema validation (min_length=8) -> 422
+    assert client.post("/api/auth/signup", json={"email": "a@b.com", "password": "short"}).status_code == 422
 
 
 def test_signup_duplicate_is_409(client):
@@ -115,6 +117,25 @@ def test_shortlists_are_isolated_per_user(client):
 def test_workspace_requires_auth(client):
     assert client.get("/api/shortlists").status_code == 401
     assert client.post("/api/shortlists", json={"kols": []}).status_code == 401
+
+
+def test_non_dict_kols_is_400_not_500(client):
+    h = _auth(_signup(client))
+    assert client.post("/api/shortlists", headers=h, json={"brief": {}, "kols": ["@a"]}).status_code == 400
+    sid = client.post("/api/shortlists", headers=h, json={"brief": {}, "kols": [{"id": "a", "handle": "@a"}]}).json()["shortlist"]["id"]
+    assert client.post(f"/api/shortlists/{sid}/kols", headers=h, json={"kols": ["@b"]}).status_code == 400
+
+
+def test_oversized_password_rejected_before_hashing(client):
+    r = client.post("/api/auth/signup", json={"email": "big@x.com", "password": "x" * 5000})
+    assert r.status_code == 422  # pydantic max_length, before any scrypt work
+
+
+def test_signup_rate_limit(client):
+    # the guest limit (15/hour/IP) trips on the 16th call from the same client
+    codes = [client.post("/api/auth/guest").status_code for _ in range(16)]
+    assert codes[:15] == [200] * 15
+    assert codes[15] == 429
 
 
 # ── honest 503 with no database ──────────────────────────────────────────────

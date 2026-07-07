@@ -93,8 +93,10 @@ def _signing_secret() -> bytes | None:
 
 
 def auth_available() -> bool:
-    """True when a signing secret can be derived (i.e. accounts can work)."""
-    return _signing_secret() is not None
+    """True when accounts can actually work: a signing secret AND a database. Requiring the
+    DB too keeps the 'no DB -> honest 503' contract — a secret alone (e.g. KOLLAB_AUTH_SECRET
+    set without DATABASE_URL) would otherwise pass the guard and then 500 in the DB layer."""
+    return _signing_secret() is not None and os.getenv("DATABASE_URL") is not None
 
 
 def reset_auth_cache() -> None:

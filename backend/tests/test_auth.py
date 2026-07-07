@@ -79,7 +79,13 @@ def test_token_bound_to_secret(monkeypatch):
 
 
 # ── secret derivation + availability ─────────────────────────────────────────
-def test_auth_available_with_explicit_secret():
+def test_auth_needs_both_a_secret_and_a_database(monkeypatch):
+    # a secret alone must NOT enable auth (else the DB layer 500s) — it needs a DB too
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    reset_db_cache()
+    assert auth_available() is False
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@host/db")
+    reset_db_cache()
     assert auth_available() is True
 
 

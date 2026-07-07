@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager, contextmanager
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
@@ -440,6 +440,26 @@ def outreach_endpoint(
 
 
 # ── Accounts + durable workspace ─────────────────────────────────────────────
+# A tiny in-process sliding-window rate limiter for the UNAUTHENTICATED auth endpoints
+# (bounds guest-mint / signup-scrypt / login-guess floods without a new dependency). Keyed
+# by client IP; buckets self-trim. Single Render instance, so process-local is sufficient.
+import time as _time
+from collections import defaultdict, deque
+
+_rl_buckets: dict[str, deque] = defaultdict(deque)
+
+
+def _rate_limit(request: Request | None, action: str, limit: int, window_s: int) -> None:
+    ip = (request.client.host if request and request.client else "anon")
+    now = _time.time()
+    dq = _rl_buckets[f"{action}:{ip}"]
+    while dq and dq[0] < now - window_s:
+        dq.popleft()
+    if len(dq) >= limit:
+        raise HTTPException(status_code=429, detail="Too many attempts — please wait a moment and try again.")
+    dq.append(now)
+
+
 def _require_auth() -> None:
     if not auth_available():
         raise HTTPException(status_code=503,
@@ -468,25 +488,31 @@ def _valid_email(email: str) -> bool:
 
 
 @app.post("/api/auth/signup")
-def signup(req: SignupRequest) -> dict:
+def signup(req: SignupRequest, request: Request) -> dict:
     _require_auth()
+    _rate_limit(request, "signup", limit=10, window_s=3600)
     if not _valid_email(req.email):
         raise HTTPException(status_code=400, detail="Enter a valid email address.")
-    if len(req.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
-    from app.accounts import create_user
+    from sqlalchemy.exc import IntegrityError
 
+    from app.accounts import create_user, find_by_email
+
+    # Cheap existence check first, so a duplicate email 409s WITHOUT spending scrypt.
+    if find_by_email(req.email):
+        raise HTTPException(status_code=409, detail="That email is already registered.")
     try:
         user = create_user(req.email, req.password)
-    except Exception:
-        # a duplicate email is the only expected failure -> 409 (the one accepted disclosure)
+    except IntegrityError:
+        # a race between the check and the insert — still just a duplicate
         raise HTTPException(status_code=409, detail="That email is already registered.")
+    # any other exception (DB down, etc.) propagates -> honest 500/503, never a fake 409
     return {"token": issue_token(user["id"]), "user": user}
 
 
 @app.post("/api/auth/login")
-def login(req: LoginRequest) -> dict:
+def login(req: LoginRequest, request: Request) -> dict:
     _require_auth()
+    _rate_limit(request, "login", limit=30, window_s=300)
     from app.accounts import find_by_email, get_user
 
     row = find_by_email(req.email)
@@ -501,10 +527,11 @@ def login(req: LoginRequest) -> dict:
 
 
 @app.post("/api/auth/guest")
-def guest() -> dict:
+def guest(request: Request) -> dict:
     """One-click 'Explore the demo': mint an isolated guest account seeded with the demo
     Glow Lab shortlist, and return a token."""
     _require_auth()
+    _rate_limit(request, "guest", limit=15, window_s=3600)
     from app.accounts import create_guest, seed_guest_workspace
 
     user = create_guest()
@@ -535,8 +562,9 @@ def list_shortlists_endpoint(user: dict = Depends(current_user)) -> dict:
 
 @app.post("/api/shortlists", status_code=201)
 def create_shortlist_endpoint(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict:
-    if not isinstance(payload.get("kols"), list):
-        raise HTTPException(status_code=400, detail="A shortlist needs a kols array.")
+    kols = payload.get("kols")
+    if not isinstance(kols, list) or not all(isinstance(k, dict) for k in kols):
+        raise HTTPException(status_code=400, detail="A shortlist needs a kols array of objects.")
     from app.accounts import create_shortlist
 
     return {"shortlist": create_shortlist(user["id"], payload)}
@@ -554,9 +582,12 @@ def get_shortlist_endpoint(sid: str, user: dict = Depends(current_user)) -> dict
 
 @app.post("/api/shortlists/{sid}/kols")
 def append_kols_endpoint(sid: str, body: dict = Body(...), user: dict = Depends(current_user)) -> dict:
+    kols = body.get("kols") or []
+    if not isinstance(kols, list) or not all(isinstance(k, dict) for k in kols):
+        raise HTTPException(status_code=400, detail="kols must be an array of objects.")
     from app.accounts import append_kols
 
-    res = append_kols(user["id"], sid, body.get("kols") or [])
+    res = append_kols(user["id"], sid, kols)
     if res is None:
         raise HTTPException(status_code=404, detail="Shortlist not found")
     return {"added": res["added"], "shortlist": res["entry"]}

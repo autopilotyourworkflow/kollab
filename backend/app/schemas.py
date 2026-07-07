@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 Provenance = Literal["measured", "inferred", "estimated"]
@@ -237,13 +237,15 @@ class OutreachDraft(CamelModel):
 
 
 class SignupRequest(CamelModel):
-    email: str
-    password: str
+    email: str = Field(max_length=254)
+    password: str = Field(min_length=8, max_length=1024)  # cap before hashing (scrypt DoS)
 
 
 class LoginRequest(CamelModel):
-    email: str
-    password: str
+    email: str = Field(max_length=254)
+    # No min_length here: a too-short password must still take the normal 401 path (not a
+    # distinct 422), so it can't be used to probe. max_length caps the pre-hash work.
+    password: str = Field(max_length=1024)
 
 
 class BrandDnaRequest(CamelModel):

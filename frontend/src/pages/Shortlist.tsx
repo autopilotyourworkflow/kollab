@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react"
+import { useMemo, useRef, useState, useEffect } from "react"
 import { useOutletContext, useParams, Navigate, Link } from "react-router-dom"
 import { AnimatePresence, motion } from "motion/react"
 import {
@@ -73,15 +73,26 @@ export function Shortlist() {
   const { search, setSearch } = useOutletContext<AppContext>()
   const [entry, setEntry] = useState<ShortlistEntry | null>(null)
   const [loading, setLoading] = useState(true)
+  // Load the current id; `aliveRef` invalidates an in-flight load when the id changes, so
+  // a slow getEntry(A) resolving after navigating to B never renders A under B's URL.
+  const aliveRef = useRef(0)
   const load = () => {
+    const token = ++aliveRef.current
     getEntry(id)
-      .then((e) => setEntry(e))
+      .then((e) => {
+        if (aliveRef.current === token) setEntry(e)
+      })
       .catch(() => {})
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (aliveRef.current === token) setLoading(false)
+      })
   }
   useEffect(() => {
     setLoading(true)
     load()
+    return () => {
+      aliveRef.current++ // invalidate any load in flight for the previous id
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 

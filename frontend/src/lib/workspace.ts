@@ -68,11 +68,23 @@ export function counts(kols: Kol[]): { recommended: number; flagged: number } {
 }
 
 // ── API store (primary, when a backend is configured) ────────────────────────
+/** Fired when the server rejects our token (expired / reaped guest); AuthContext listens
+ *  and re-gates the app so a write is never silently lost against a dead session. */
+export const AUTH_EXPIRED = "kollab-auth-expired"
+
 async function wsFetch(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(`${apiBase()}${path}`, {
     ...init,
     headers: { "content-type": "application/json", ...authHeaders(), ...(init?.headers ?? {}) },
   })
+  if (res.status === 401) {
+    try {
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED))
+    } catch {
+      /* no window */
+    }
+    throw new Error("session expired")
+  }
   if (!res.ok && res.status !== 404) throw new Error(`workspace request failed (${res.status})`)
   return res
 }

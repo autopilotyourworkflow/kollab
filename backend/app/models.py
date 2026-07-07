@@ -140,6 +140,16 @@ class Shortlist(Base):
     def to_entry(self) -> dict:
         e = dict(self.data or {})
         e["id"] = self.id
-        e["createdAt"] = int(self.created_at.timestamp() * 1000) if self.created_at else None
-        e["updatedAt"] = int(self.updated_at.timestamp() * 1000) if self.updated_at else None
+        e["createdAt"] = _epoch_ms(self.created_at)
+        e["updatedAt"] = _epoch_ms(self.updated_at)
         return e
+
+
+def _epoch_ms(dt: datetime | None) -> int | None:
+    """Epoch milliseconds, normalizing to aware-UTC first so SQLite's tz-naive reads don't
+    shift the value by the host's UTC offset (Postgres returns aware; both agree)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1000)

@@ -62,6 +62,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [mode])
 
+  // A workspace request that 401s (expired / reaped token) re-gates the app live, so a
+  // write is never silently lost against a dead session.
+  useEffect(() => {
+    if (mode !== "api") return
+    const onExpired = () => {
+      clearAuthToken()
+      setUser(null)
+    }
+    window.addEventListener("kollab-auth-expired", onExpired)
+    return () => window.removeEventListener("kollab-auth-expired", onExpired)
+  }, [mode])
+
   const adopt = (r: AuthResult) => {
     setAuthToken(r.token)
     setUser(r.user)
