@@ -16,7 +16,7 @@ import {
 } from "lucide-react"
 import { Button } from "../components/ui/Button"
 import { ProvenanceChip } from "../components/ui/ProvenanceChip"
-import { client, brandDna, kols as demoKols, summary as demoSummary, cost as demoCost } from "../data/kols"
+import { client, brandDna, kols as demoKols, summary as demoSummary, cost as demoCost, commenterOverlap as demoOverlap } from "../data/kols"
 import { authHeaders } from "../lib/credentials"
 import { apiBase, fetchCredit, runExceedsCredit, type CreditInfo } from "../lib/credit"
 import { createEntry } from "../lib/workspace"
@@ -131,6 +131,8 @@ export function NewShortlist() {
   }
 
   const [live, setLive] = useState<LiveExtraction | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
 
   // Run depth & budget: preset selection (or custom volumes) + editable hard cap.
   const [planKey, setPlanKey] = useState(plans.defaultPreset)
@@ -605,7 +607,11 @@ export function NewShortlist() {
               Re-analyze
             </Button>
             <Button
-              onClick={() => {
+              disabled={creating}
+              onClick={async () => {
+                if (creating) return
+                setCreateError(null)
+                setCreating(true)
                 // Create the shortlist (its own campaign in the workspace) from the
                 // edited brief + this run's results, then run the pipeline animation
                 // which lands on the new shortlist's page.
@@ -618,19 +624,30 @@ export function NewShortlist() {
                   region,
                   website: url.trim() || client.website,
                 }
-                const entry = createEntry(brief, demoKols, {
-                  source: "fixtures",
-                  screened: demoSummary.screened,
-                  cost: demoCost,
-                })
-                saveRunPlan(plan)
-                navigate(`/app/run?id=${entry.id}`)
+                try {
+                  const entry = await createEntry(brief, demoKols, {
+                    source: "fixtures",
+                    screened: demoSummary.screened,
+                    cost: demoCost,
+                    commenterOverlap: demoOverlap,
+                  })
+                  saveRunPlan(plan)
+                  navigate(`/app/run?id=${entry.id}`)
+                } catch {
+                  setCreateError("Couldn't save the shortlist. Check your connection and try again.")
+                  setCreating(false)
+                }
               }}
-              trailingIcon={<ArrowRight size={16} />}
+              trailingIcon={creating ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
             >
-              Find matching KOLs
+              {creating ? "Saving…" : "Find matching KOLs"}
             </Button>
           </div>
+          {createError && (
+            <p role="alert" className="mt-3 text-right text-[12px] font-medium text-risk-high-fg">
+              {createError}
+            </p>
+          )}
         </motion.div>
       )}
     </div>

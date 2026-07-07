@@ -1,11 +1,12 @@
-/** The Shortlists workspace — a client-side (localStorage) store of every campaign.
+/** The Shortlists workspace — per-user campaigns + HITL decisions.
  *
- * This is what powers the Dashboard (a home of shortlist cards) and accumulation
- * (each shortlist grows across runs, dedup by handle, with approve/reject decisions
- * persisted). It lives in the browser — same pattern as the saved brief / run plan —
- * so it works on the static demo with no backend, and a live run just appends real
- * creators to the same list. On first load it seeds one shortlist from the bundled
- * demo fixtures so the Dashboard is never empty. */
+ * PRIMARY store is the backend (Neon), reached through these functions when a backend is
+ * configured (`apiBase()` truthy). With NO backend — the pure-static bundle / offline demo —
+ * the same functions fall back to a localStorage store so the app never dead-ends. The
+ * public API is async either way; the local branch just resolves immediately.
+ *
+ * Every function that talks to the API is user-scoped by the bearer token (attached in
+ * authHeaders()); the server owns ids, dedup, and ordering. */
 
 import type { ClientBrief, HitlStatus, Kol, OverlapPair, RiskLevel, Tier } from "./types"
 import {
@@ -15,6 +16,8 @@ import {
   cost as demoCost,
   commenterOverlap as demoOverlap,
 } from "../data/kols"
+import { apiBase } from "./credit"
+import { authHeaders } from "./credentials"
 
 export interface Decision {
   status: HitlStatus
@@ -36,7 +39,6 @@ export interface ShortlistEntry {
   runs: number
   source: "fixtures" | "api"
   cost: RunCost
-  /** Commenter-overlap pairs across this shortlist (dedup helper). */
   commenterOverlap: OverlapPair[]
   createdAt: number
   updatedAt: number
@@ -57,8 +59,7 @@ function newId(): string {
   }
 }
 
-/** recommended = clear + fit≥70; flagged = any risk. Recomputed from the live list
- *  so the card counts can never drift from the rows. */
+/** recommended = clear + fit≥70; flagged = any risk. Pure + sync — used in render. */
 export function counts(kols: Kol[]): { recommended: number; flagged: number } {
   return {
     recommended: kols.filter((k) => k.risk.level === "clear" && k.fitScore >= 70).length,
@@ -66,6 +67,42 @@ export function counts(kols: Kol[]): { recommended: number; flagged: number } {
   }
 }
 
+// ── API store (primary, when a backend is configured) ────────────────────────
+async function wsFetch(path: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(`${apiBase()}${path}`, {
+    ...init,
+    headers: { "content-type": "application/json", ...authHeaders(), ...(init?.headers ?? {}) },
+  })
+  if (!res.ok && res.status !== 404) throw new Error(`workspace request failed (${res.status})`)
+  return res
+}
+
+async function apiList(): Promise<ShortlistEntry[]> {
+  const res = await wsFetch("/api/shortlists")
+  return ((await res.json()) as { shortlists: ShortlistEntry[] }).shortlists
+}
+
+async function apiGet(id: string): Promise<ShortlistEntry | null> {
+  const res = await wsFetch(`/api/shortlists/${encodeURIComponent(id)}`)
+  if (res.status === 404) return null
+  return ((await res.json()) as { shortlist: ShortlistEntry }).shortlist
+}
+
+async function apiCreate(entry: object): Promise<ShortlistEntry> {
+  const res = await wsFetch("/api/shortlists", { method: "POST", body: JSON.stringify(entry) })
+  return ((await res.json()) as { shortlist: ShortlistEntry }).shortlist
+}
+
+async function apiAppend(id: string, kols: Kol[]): Promise<number> {
+  const res = await wsFetch(`/api/shortlists/${encodeURIComponent(id)}/kols`, {
+    method: "POST",
+    body: JSON.stringify({ kols }),
+  })
+  if (res.status === 404) return 0
+  return ((await res.json()) as { added: number }).added
+}
+
+// ── local store (fallback, no backend) ───────────────────────────────────────
 function seedEntry(): ShortlistEntry {
   const now = Date.now()
   return {
@@ -89,7 +126,6 @@ function read(): Workspace {
     if (raw) {
       const w = JSON.parse(raw) as Workspace
       if (Array.isArray(w?.shortlists)) {
-        // migrate entries saved before commenterOverlap existed
         for (const s of w.shortlists) if (!Array.isArray(s.commenterOverlap)) s.commenterOverlap = []
         return w
       }
@@ -106,25 +142,11 @@ function write(w: Workspace): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(w))
   } catch {
-    /* storage full/unavailable — in-memory callers still got their result */
+    /* storage full/unavailable */
   }
 }
 
-/** All shortlists, most-recently-updated first. */
-export function listShortlists(): ShortlistEntry[] {
-  return [...read().shortlists].sort((a, b) => b.updatedAt - a.updatedAt)
-}
-
-export function getEntry(id: string): ShortlistEntry | null {
-  return read().shortlists.find((s) => s.id === id) ?? null
-}
-
-/** Create a new shortlist from a brief + its first batch of results. */
-export function createEntry(
-  brief: ClientBrief,
-  kols: Kol[],
-  opts: { source?: "fixtures" | "api"; screened?: number; cost?: RunCost; commenterOverlap?: OverlapPair[] } = {},
-): ShortlistEntry {
+function localCreate(brief: ClientBrief, kols: Kol[], opts: CreateOpts): ShortlistEntry {
   const now = Date.now()
   const entry: ShortlistEntry = {
     id: newId(),
@@ -145,9 +167,7 @@ export function createEntry(
   return entry
 }
 
-/** Append NEW creators to a shortlist (dedup by handle). Returns the number added —
- *  this is accumulation: a re-run grows the same list, never duplicates it. */
-export function appendKols(id: string, incoming: Kol[]): number {
+function localAppend(id: string, incoming: Kol[]): number {
   const w = read()
   const entry = w.shortlists.find((s) => s.id === id)
   if (!entry) return 0
@@ -163,7 +183,53 @@ export function appendKols(id: string, incoming: Kol[]): number {
   return fresh.length
 }
 
-export function setDecision(id: string, kolId: string, decision: Decision): void {
+// ── public API (async; dispatches API vs local by whether a backend exists) ──
+interface CreateOpts {
+  source?: "fixtures" | "api"
+  screened?: number
+  cost?: RunCost
+  commenterOverlap?: OverlapPair[]
+}
+
+/** All shortlists, most-recently-updated first. */
+export async function listShortlists(): Promise<ShortlistEntry[]> {
+  if (apiBase()) return apiList()
+  return [...read().shortlists].sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+export async function getEntry(id: string): Promise<ShortlistEntry | null> {
+  if (apiBase()) return apiGet(id)
+  return read().shortlists.find((s) => s.id === id) ?? null
+}
+
+export async function createEntry(brief: ClientBrief, kols: Kol[], opts: CreateOpts = {}): Promise<ShortlistEntry> {
+  if (apiBase()) {
+    return apiCreate({
+      brief,
+      kols,
+      source: opts.source ?? "fixtures",
+      screened: opts.screened ?? kols.length,
+      cost: opts.cost ?? { usd: 0, seconds: 0, cacheHitRate: 0 },
+      commenterOverlap: opts.commenterOverlap ?? [],
+    })
+  }
+  return localCreate(brief, kols, opts)
+}
+
+/** Append NEW creators (dedup by handle). Returns the number added. */
+export async function appendKols(id: string, incoming: Kol[]): Promise<number> {
+  if (apiBase()) return apiAppend(id, incoming)
+  return localAppend(id, incoming)
+}
+
+export async function setDecision(id: string, kolId: string, decision: Decision): Promise<void> {
+  if (apiBase()) {
+    await wsFetch(`/api/shortlists/${encodeURIComponent(id)}/decisions/${encodeURIComponent(kolId)}`, {
+      method: "PUT",
+      body: JSON.stringify(decision.status === "pending" ? { status: "pending" } : decision),
+    })
+    return
+  }
   const w = read()
   const entry = w.shortlists.find((s) => s.id === id)
   if (!entry) return
@@ -172,14 +238,22 @@ export function setDecision(id: string, kolId: string, decision: Decision): void
   write(w)
 }
 
-export function deleteEntry(id: string): void {
+export async function deleteEntry(id: string): Promise<void> {
+  if (apiBase()) {
+    await wsFetch(`/api/shortlists/${encodeURIComponent(id)}`, { method: "DELETE" })
+    return
+  }
   const w = read()
   w.shortlists = w.shortlists.filter((s) => s.id !== id)
   write(w)
 }
 
 /** Flip a shortlist's badge to "live" once real (backend-sourced) creators merged in. */
-export function markSourceLive(id: string): void {
+export async function markSourceLive(id: string): Promise<void> {
+  if (apiBase()) {
+    await wsFetch(`/api/shortlists/${encodeURIComponent(id)}/source-live`, { method: "POST" })
+    return
+  }
   const w = read()
   const entry = w.shortlists.find((s) => s.id === id)
   if (entry && entry.source !== "api") {
@@ -190,11 +264,9 @@ export function markSourceLive(id: string): void {
 }
 
 // ── Demo expansion pool ──────────────────────────────────────────────────────
-// So accumulation is demonstrable with NO backend: "Add more results" reveals the
-// next batch of these synthetic-but-plausible Thai beauty creators (clearly demo
-// data, like the rest of the fixtures). Some are flagged, so vetting visibly fires
-// on the newly-sourced creators too. A live backend replaces this with real
-// expand-run results.
+// "Add more results" with NO backend reveals the next batch of these synthetic-but-plausible
+// Thai beauty creators, so accumulation is demonstrable offline. A live backend uses a real
+// expand-run instead. Some are flagged, so vetting visibly fires on the new creators too.
 
 function hue(seed: string): number {
   let h = 0
@@ -257,8 +329,6 @@ function buildPoolKol(spec: PoolSpec): Kol {
       ? `${spec.name} เหมาะกับแบรนด์ คอนเทนต์สกินแคร์ เอนเกจสุขภาพดี (ER ${spec.er}%) คะแนน ${fitScore}/100`
       : `${spec.name} ดูน่าสนใจแต่ Kollab จับสัญญาณ ${signals[0].label} ส่งให้คนรีวิว ไม่ตัดออกอัตโนมัติ`
 
-  // Fair-rate basis (same shape the backend ships) so the Economics tab is consistent
-  // for demo-added creators: measured organic reach × the default CPM × authenticity.
   const cpm = 150
   const disc = Math.max(0, Math.min(1, authScore / 100))
   const point = ((medianViews * disc) / 1000) * cpm
@@ -306,19 +376,17 @@ function buildPoolKol(spec: PoolSpec): Kol {
   }
 }
 
-/** Append the next batch of demo creators not already in the shortlist. Returns the
- *  count added (0 when the demo pool is exhausted). */
-export function appendDemoBatch(id: string, batch = 4): number {
-  const entry = getEntry(id)
-  if (!entry) return 0
+/** Build the next batch of demo creators not already in the entry, and append them.
+ *  Works in both modes (server dedups by handle in API mode). Returns the count added. */
+export async function appendDemoBatch(entry: ShortlistEntry, batch = 4): Promise<number> {
   const have = new Set(entry.kols.map((k) => k.handle.toLowerCase()))
   const next = POOL_SPECS.filter((s) => !have.has(s.handle.toLowerCase())).slice(0, batch).map(buildPoolKol)
-  return appendKols(id, next)
+  if (!next.length) return 0
+  return appendKols(entry.id, next)
 }
 
-/** How many demo creators remain to be revealed for this shortlist. */
-export function demoRemaining(id: string): number {
-  const entry = getEntry(id)
+/** How many demo creators remain to reveal for this (already-loaded) entry. Sync. */
+export function demoRemaining(entry: ShortlistEntry | null): number {
   if (!entry) return 0
   const have = new Set(entry.kols.map((k) => k.handle.toLowerCase()))
   return POOL_SPECS.filter((s) => !have.has(s.handle.toLowerCase())).length

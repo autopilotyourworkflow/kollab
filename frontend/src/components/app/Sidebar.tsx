@@ -1,8 +1,42 @@
 import { useEffect, useRef, useState } from "react"
-import { Sparkles, Settings, LifeBuoy, X } from "lucide-react"
+import { Sparkles, Settings, LifeBuoy, LogOut, X } from "lucide-react"
 import { Link } from "react-router-dom"
 import { cn } from "../../lib/cn"
+import { useAuth } from "../../context/AuthContext"
 import ccLogo from "../../assets/convertcake-logo.png"
+
+/** The signed-in identity + sign-out (only in API mode; local/offline has no account). */
+function UserCard({ onNavigate }: { onNavigate: () => void }) {
+  const { user, mode, logout } = useAuth()
+  const isGuest = !!user?.isGuest
+  const title = mode === "local" ? "Offline demo" : isGuest ? "Guest workspace" : "Signed in"
+  const sub = mode === "local" ? "no account needed" : isGuest ? "Explore the demo" : user?.email ?? "your account"
+  const initial = (user?.email?.[0] ?? (isGuest ? "G" : "K")).toUpperCase()
+  return (
+    <div className="flex items-center gap-2.5 rounded-xl bg-surface px-2.5 py-2">
+      <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-100 text-[11px] font-bold text-brand">
+        {initial}
+      </div>
+      <div className="min-w-0 flex-1 leading-tight">
+        <div className="truncate text-[12px] font-semibold text-ink">{title}</div>
+        <div className="truncate text-[10px] text-ink-500">{sub}</div>
+      </div>
+      {mode === "api" && (
+        <button
+          onClick={() => {
+            onNavigate()
+            void logout()
+          }}
+          title="Sign out"
+          aria-label="Sign out"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-ink-400 transition-colors hover:bg-panel hover:text-ink"
+        >
+          <LogOut size={14} />
+        </button>
+      )}
+    </div>
+  )
+}
 
 interface Tool {
   name: string
@@ -177,15 +211,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <span className="text-[12px] font-medium">Guide</span>
             </Link>
           </div>
-          <div className="flex items-center gap-2.5 rounded-xl bg-surface px-2.5 py-2">
-            <div className="grid h-7 w-7 place-items-center rounded-full bg-brand-100 text-[11px] font-bold text-brand">
-              B
-            </div>
-            <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-[12px] font-semibold text-ink">Beam</div>
-              <div className="truncate text-[10px] text-ink-500">AI Engineer</div>
-            </div>
-          </div>
+          <UserCard onNavigate={onClose} />
         </div>
       </aside>
     </>

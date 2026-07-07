@@ -4,7 +4,7 @@ import { motion } from "motion/react"
 import { Check, Loader2, ShieldAlert, Gauge, ArrowRight, Sparkles, XCircle, RotateCcw, Layers } from "lucide-react"
 import { Button } from "../components/ui/Button"
 import { client, summary, cost as demoCost } from "../data/kols"
-import { getEntry, counts } from "../lib/workspace"
+import { getEntry, counts, type ShortlistEntry } from "../lib/workspace"
 import { loadRunPlan } from "../lib/runPlan"
 import { cn } from "../lib/cn"
 
@@ -69,7 +69,10 @@ export function PipelineRun() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const id = searchParams.get("id") ?? ""
-  const entry = getEntry(id)
+  const [entry, setEntry] = useState<ShortlistEntry | null>(null)
+  useEffect(() => {
+    getEntry(id).then(setEntry).catch(() => {})
+  }, [id])
   const c = entry ? counts(entry.kols) : { recommended: summary.recommended, flagged: summary.flagged }
   const brand = entry?.brief.brand ?? client.brand
   const screened = entry?.screened ?? summary.screened

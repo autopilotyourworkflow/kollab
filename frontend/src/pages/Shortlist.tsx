@@ -71,17 +71,29 @@ function useIsMobile() {
 export function Shortlist() {
   const { id = "" } = useParams()
   const { search, setSearch } = useOutletContext<AppContext>()
-  const [entry, setEntry] = useState<ShortlistEntry | null>(() => getEntry(id))
-  const refresh = () => setEntry(getEntry(id))
+  const [entry, setEntry] = useState<ShortlistEntry | null>(null)
+  const [loading, setLoading] = useState(true)
+  const load = () => {
+    getEntry(id)
+      .then((e) => setEntry(e))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => {
+    setLoading(true)
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   // When the run dock merges a finished run's creators into THIS shortlist, re-read.
   useEffect(() => {
     const on = (e: Event) => {
       const detail = (e as CustomEvent).detail as { shortlistId?: string } | undefined
-      if (detail?.shortlistId === id) setEntry(getEntry(id))
+      if (detail?.shortlistId === id) load()
     }
     window.addEventListener(WORKSPACE_UPDATED, on)
     return () => window.removeEventListener(WORKSPACE_UPDATED, on)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
   const [filter, setFilter] = useState<Filter>("all")
@@ -102,8 +114,9 @@ export function Shortlist() {
 
   const setDecision = (kolId: string, status: HitlStatus, reason?: string) => {
     if (!entry) return
-    persistDecision(entry.id, kolId, { status, reason })
-    refresh()
+    const next = status === "pending" ? { status: "pending" as HitlStatus } : { status, reason }
+    setEntry({ ...entry, decisions: { ...entry.decisions, [kolId]: next } }) // optimistic
+    persistDecision(entry.id, kolId, { status, reason }).catch(load)
   }
 
   // "Add more results": accumulate NEW creators into this same shortlist. A live
@@ -117,10 +130,10 @@ export function Shortlist() {
     if (!entry || adding) return
     // No backend -> demo pool (instant, offline).
     if (!apiBase()) {
-      const n = appendDemoBatch(entry.id, DEMO_BATCH[depthKey] ?? 4)
+      const n = await appendDemoBatch(entry, DEMO_BATCH[depthKey] ?? 4)
       setJustAdded(n)
       window.setTimeout(() => setJustAdded(null), 4000)
-      refresh()
+      load()
       return
     }
     // Live -> start a background run and hand it to the dock (fire-and-forget). The
@@ -137,10 +150,10 @@ export function Shortlist() {
         setStartedHint(true)
         window.setTimeout(() => setStartedHint(false), 7000)
       } else {
-        const n = appendDemoBatch(entry.id, DEMO_BATCH[depthKey] ?? 4)
+        const n = await appendDemoBatch(entry, DEMO_BATCH[depthKey] ?? 4)
         setJustAdded(n)
         window.setTimeout(() => setJustAdded(null), 4000)
-        refresh()
+        load()
       }
     } finally {
       setAdding(false)
@@ -167,6 +180,13 @@ export function Shortlist() {
     [q, kols],
   )
 
+  // Distinguish loading from not-found: only redirect once the load settled empty.
+  if (loading)
+    return (
+      <div className="grid min-h-[60svh] place-items-center">
+        <Loader2 size={24} className="animate-spin text-brand" />
+      </div>
+    )
   // A missing/deleted id sends the user back to the Dashboard rather than a blank page.
   if (!entry) return <Navigate to="/app" replace />
 
@@ -183,7 +203,7 @@ export function Shortlist() {
   }
   const audience = entry.brief.audience
   const pillars = entry.brief.pillars
-  const remaining = demoRemaining(entry.id)
+  const remaining = demoRemaining(entry)
   const canAdd = remaining > 0 || !!apiBase()
 
   return (

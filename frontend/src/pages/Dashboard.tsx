@@ -1,10 +1,11 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion } from "motion/react"
-import { Plus, ShieldAlert, Users, Trash2, Layers, Clock, ArrowRight } from "lucide-react"
+import { Plus, ShieldAlert, Users, Trash2, Layers, Clock, ArrowRight, Loader2 } from "lucide-react"
 import { Button } from "../components/ui/Button"
 import { GraphCard } from "../components/app/GraphCard"
 import { listShortlists, deleteEntry, counts, type ShortlistEntry } from "../lib/workspace"
+import { WORKSPACE_UPDATED } from "../lib/runsStore"
 import { cn } from "../lib/cn"
 
 function relTime(ts: number): string {
@@ -128,15 +129,43 @@ function ShortlistCard({ entry, onDelete }: { entry: ShortlistEntry; onDelete: (
 
 export function Dashboard() {
   const navigate = useNavigate()
-  const [entries, setEntries] = useState<ShortlistEntry[]>(listShortlists)
+  const [entries, setEntries] = useState<ShortlistEntry[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const refresh = () => setEntries(listShortlists())
+  const refresh = () => {
+    listShortlists()
+      .then(setEntries)
+      .catch(() => {
+        /* keep the last-known list on a transient error */
+      })
+      .finally(() => setLoading(false))
+  }
+  useEffect(refresh, [])
+  // Re-read when a run merges creators, or when the tab regains focus (another device).
+  useEffect(() => {
+    const on = () => refresh()
+    window.addEventListener(WORKSPACE_UPDATED, on)
+    window.addEventListener("focus", on)
+    return () => {
+      window.removeEventListener(WORKSPACE_UPDATED, on)
+      window.removeEventListener("focus", on)
+    }
+  }, [])
+
   const onDelete = (id: string) => {
-    deleteEntry(id)
-    refresh()
+    setEntries((es) => es.filter((e) => e.id !== id)) // optimistic
+    deleteEntry(id).catch(refresh)
   }
 
   const totalFlagged = entries.reduce((n, e) => n + counts(e.kols).flagged, 0)
+
+  if (loading && entries.length === 0) {
+    return (
+      <div className="grid min-h-[60svh] place-items-center">
+        <Loader2 size={24} className="animate-spin text-brand" />
+      </div>
+    )
+  }
 
   return (
     <div className="px-[var(--d-page-px)] py-[var(--d-page-py)]">

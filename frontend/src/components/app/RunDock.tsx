@@ -63,10 +63,10 @@ export function RunDock() {
           if (!res) continue
           if (res.status === "done") {
             const kols = res.kols ?? []
-            const added = appendKols(r.shortlistId, kols)
-            if (added && kols.length) markSourceLive(r.shortlistId)
+            const added = await appendKols(r.shortlistId, kols)
+            if (added && kols.length) await markSourceLive(r.shortlistId)
             updateRun(r.id, { status: "done", added })
-            announceWorkspaceUpdate(r.shortlistId)
+            announceWorkspaceUpdate(r.shortlistId) // after the awaited writes land
           } else if (res.status === "error") {
             updateRun(r.id, { status: "error", error: res.error ?? "run failed" })
           } else if (res.status === "cancelled") {
