@@ -186,7 +186,7 @@ const features = [
   {
     icon: Database,
     title: "Native to your data",
-    body: "The judgment layer on top of your licensed KOL feed, not another scraper. n8n keeps it re-vetting on a schedule, and it deploys in your own cloud.",
+    body: "The judgment layer on top of your licensed KOL feed, not another scraper. It re-vets on a schedule and alerts on drift, and it deploys in your own cloud.",
   },
 ]
 

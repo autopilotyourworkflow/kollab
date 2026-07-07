@@ -1,0 +1,34 @@
+name: Scheduled re-vet
+
+# The "operate, not run" adoption proof, self-contained in the repo — no n8n instance,
+# no external SaaS. A shortlist decays (pods spin up, engagement collapses); this re-vets
+# on a schedule and surfaces only the changes a human should review, in the run summary.
+#
+#   • schedule       → the weekly production trigger (Mon 08:00 Asia/Bangkok = 01:00 UTC)
+#   • workflow_dispatch → the manual "Run workflow" button = the on-demand trigger
+#
+# The `--demo` run diffs the seed against a synthetic healthy baseline, so every run
+# visibly demonstrates the alert path AND regression-guards the fraud detectors. For real
+# week-over-week drift on a live workspace, add a KOLLAB_API_URL repo variable and run
+# `python -m app.revet --source api --snapshot <persisted-path>` (see ops/README.md).
+
+on:
+  schedule:
+    - cron: "0 1 * * 1"
+  workflow_dispatch:
+
+jobs:
+  revet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend deps
+        run: pip install -r backend/requirements.txt
+      - name: Re-vet sweep
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: python -m app.revet --demo

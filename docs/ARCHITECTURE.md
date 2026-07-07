@@ -168,7 +168,7 @@ localhost.
 
 ## Testing
 
-245 tests (`backend/tests/`) on synthetic data + fake clients: run-depth plan math +
+254 tests (`backend/tests/`) on synthetic data + fake clients: run-depth plan math +
 frontend-parity enforcement, every detector (pod / burst /
 templated / thin / ER-outlier / view-to-follower / boosted / dormancy) in both firing and
 silent cases, the withhold paths (min-cohort AND min-video-sample), vetting dedup + ordering
@@ -178,7 +178,7 @@ dormancy not fraud-templated), the citation validator AND the LLM rerank against
 degradation chain (Claude → Gemini → rules, unreachable-site case), the Apify actor loop
 against a fake client (assembly, tier/vertical inference, budget stop, refuse-before-spend),
 the auth core (scrypt password hashing + HMAC session-token round-trip) and the
-signup/login/guest + per-user shortlists CRUD API, the trust layer, seed determinism incl. realized-ER == descriptor, the Apify mappers (ISO +
+signup/login/guest + per-user shortlists CRUD API, the scheduled re-vet diff (`app/revet.py`), the trust layer, seed determinism incl. realized-ER == descriptor, the Apify mappers (ISO +
 epoch + dropped-unstamped cases), the 503/400 precondition answers, and an end-to-end
 pipeline assertion that the seed shortlist reproduces the deployed UI's exact risk story and
 emits the camelCase contract.

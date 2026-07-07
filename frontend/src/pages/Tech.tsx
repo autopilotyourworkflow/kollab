@@ -145,7 +145,7 @@ const STACK: { layer: string; choice: string; why: string }[] = [
   },
   {
     layer: "Testing",
-    choice: "pytest — 245 hermetic tests",
+    choice: "pytest — 254 hermetic tests",
     why: "Synthetic data + injected fake clients. Zero network, runs in under two seconds, deterministic by construction.",
   },
 ]
@@ -160,7 +160,7 @@ const PRINCIPLES: { icon: typeof ShieldCheck; title: string; body: string }[] = 
   {
     icon: FlaskConical,
     title: "Deterministic in fixtures mode",
-    body: "Per-handle seeded RNG plus the dataset's own as_of date as “now” — no Date.now(), no live randomness. That's what makes the 245-test suite meaningful and the demo byte-reproducible on every run.",
+    body: "Per-handle seeded RNG plus the dataset's own as_of date as “now” — no Date.now(), no live randomness. That's what makes the 254-test suite meaningful and the demo byte-reproducible on every run.",
   },
   {
     icon: Database,
@@ -252,6 +252,7 @@ const BUILT = [
   "Authenticated Neon workspace (scrypt + HMAC), with a no-backend local fallback",
   "Budget-capped Apify sourcing loop · Brand DNA chain · citation-validated LLM rerank",
   "Run-depth selector with live cost estimates · internal vetting-report export · eval harness",
+  "Scheduled re-vet sweep — self-contained GitHub Actions cron + manual dispatch (also importable into n8n)",
 ]
 const ROADMAP = [
   "A first live calibration run against the real actors + a recorded live-extraction demo",
@@ -347,7 +348,7 @@ export function Tech() {
           </p>
           <div className="mt-7 flex flex-wrap gap-2">
             {[
-              "245 tests, all green",
+              "254 tests, all green",
               "FastAPI · React 19 · Neon",
               "LLM-optional by design",
               "Live in < 60s",
@@ -596,7 +597,7 @@ export function Tech() {
             <SectionHeader id="testing" title="Testing & quality" icon={FlaskConical} />
             <div className="grid gap-3 sm:grid-cols-3">
               {[
-                { v: "245", l: "hermetic backend tests" },
+                { v: "254", l: "hermetic backend tests" },
                 { v: "~6s", l: "full suite, zero network" },
                 { v: "0", l: "fabricated numbers on screen" },
               ].map((s) => (
