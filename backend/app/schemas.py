@@ -236,6 +236,16 @@ class OutreachDraft(CamelModel):
     note: str
 
 
+class SignupRequest(CamelModel):
+    email: str
+    password: str
+
+
+class LoginRequest(CamelModel):
+    email: str
+    password: str
+
+
 class BrandDnaRequest(CamelModel):
     website: str
 

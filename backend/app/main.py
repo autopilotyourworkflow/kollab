@@ -15,11 +15,19 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager, contextmanager
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app import keypool
+from app.auth import (
+    _DUMMY_HASH,
+    auth_available,
+    issue_token,
+    normalize_email,
+    verify_password,
+    verify_token,
+)
 from app.fraud.graph import get_graph_store
 from app.config import (
     get_settings,
@@ -37,9 +45,11 @@ from app.schemas import (
     DeliveredPostRequest,
     DeliveryAudit,
     DeliveryLogRequest,
+    LoginRequest,
     OutreachDraft,
     OutreachRequest,
     ShortlistResponse,
+    SignupRequest,
 )
 from app.service import BadRequest, LiveRunError, run_shortlist
 from app.sources.plans import public_payload
@@ -127,6 +137,14 @@ async def lifespan(_app: FastAPI):
         _start_key_refresher()
     except Exception:
         pass
+    # Best-effort cleanup of idle guest accounts (no cron needed — free-tier cold starts
+    # run this often). Never blocks startup.
+    try:
+        from app.accounts import reap_guests
+
+        reap_guests()
+    except Exception:
+        pass
     yield
 
 
@@ -175,6 +193,8 @@ def health() -> dict:
         # Which backend the persistent commenter graph runs on (cheap flag; the full
         # size/pod readout is GET /api/graph). "neon" = durable, "memory" = demo.
         "commenter_graph": get_graph_store().backend,
+        # Whether accounts / the durable workspace are available (a signing secret exists).
+        "auth": auth_available(),
     }
 
 
@@ -417,6 +437,156 @@ def outreach_endpoint(
         from app.matching.outreach import generate_outreach
 
         return generate_outreach(req.kol, req.brief)
+
+
+# ── Accounts + durable workspace ─────────────────────────────────────────────
+def _require_auth() -> None:
+    if not auth_available():
+        raise HTTPException(status_code=503,
+                            detail="Accounts need a database — set DATABASE_URL (Neon).")
+
+
+def current_user(authorization: str | None = Header(default=None)) -> dict:
+    """Resolve the bearer token to a user, or 401. 503 (never 500) with no database."""
+    _require_auth()
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    uid = verify_token(authorization[7:].strip())
+    if uid is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    from app.accounts import get_user
+
+    user = get_user(uid)
+    if user is None:  # e.g. a reaped guest
+        raise HTTPException(status_code=401, detail="Unknown user")
+    return user
+
+
+def _valid_email(email: str) -> bool:
+    e = normalize_email(email)
+    return "@" in e and "." in e.split("@")[-1] and len(e) <= 254
+
+
+@app.post("/api/auth/signup")
+def signup(req: SignupRequest) -> dict:
+    _require_auth()
+    if not _valid_email(req.email):
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    from app.accounts import create_user
+
+    try:
+        user = create_user(req.email, req.password)
+    except Exception:
+        # a duplicate email is the only expected failure -> 409 (the one accepted disclosure)
+        raise HTTPException(status_code=409, detail="That email is already registered.")
+    return {"token": issue_token(user["id"]), "user": user}
+
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest) -> dict:
+    _require_auth()
+    from app.accounts import find_by_email, get_user
+
+    row = find_by_email(req.email)
+    # Spend the same scrypt cost whether or not the email exists (no enumeration timing gap),
+    # and answer with an identical message either way.
+    if row is None:
+        verify_password(req.password, _DUMMY_HASH)
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    if not verify_password(req.password, row["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    return {"token": issue_token(row["id"]), "user": get_user(row["id"])}
+
+
+@app.post("/api/auth/guest")
+def guest() -> dict:
+    """One-click 'Explore the demo': mint an isolated guest account seeded with the demo
+    Glow Lab shortlist, and return a token."""
+    _require_auth()
+    from app.accounts import create_guest, seed_guest_workspace
+
+    user = create_guest()
+    try:
+        seed_guest_workspace(user["id"])
+    except Exception:
+        pass  # a seeding hiccup shouldn't block sign-in; the workspace just starts empty
+    return {"token": issue_token(user["id"]), "user": user}
+
+
+@app.get("/api/auth/me")
+def whoami(user: dict = Depends(current_user)) -> dict:
+    return user
+
+
+@app.post("/api/auth/logout")
+def logout() -> dict:
+    # Tokens are stateless; the client drops it. (Endpoint exists for a clean client API.)
+    return {"ok": True}
+
+
+@app.get("/api/shortlists")
+def list_shortlists_endpoint(user: dict = Depends(current_user)) -> dict:
+    from app.accounts import list_shortlists
+
+    return {"shortlists": list_shortlists(user["id"])}
+
+
+@app.post("/api/shortlists", status_code=201)
+def create_shortlist_endpoint(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict:
+    if not isinstance(payload.get("kols"), list):
+        raise HTTPException(status_code=400, detail="A shortlist needs a kols array.")
+    from app.accounts import create_shortlist
+
+    return {"shortlist": create_shortlist(user["id"], payload)}
+
+
+@app.get("/api/shortlists/{sid}")
+def get_shortlist_endpoint(sid: str, user: dict = Depends(current_user)) -> dict:
+    from app.accounts import get_shortlist
+
+    entry = get_shortlist(user["id"], sid)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Shortlist not found")
+    return {"shortlist": entry}
+
+
+@app.post("/api/shortlists/{sid}/kols")
+def append_kols_endpoint(sid: str, body: dict = Body(...), user: dict = Depends(current_user)) -> dict:
+    from app.accounts import append_kols
+
+    res = append_kols(user["id"], sid, body.get("kols") or [])
+    if res is None:
+        raise HTTPException(status_code=404, detail="Shortlist not found")
+    return {"added": res["added"], "shortlist": res["entry"]}
+
+
+@app.put("/api/shortlists/{sid}/decisions/{kol_id}", status_code=204)
+def set_decision_endpoint(sid: str, kol_id: str, body: dict = Body(...),
+                          user: dict = Depends(current_user)) -> None:
+    from app.accounts import set_decision
+
+    if not set_decision(user["id"], sid, kol_id, body):
+        raise HTTPException(status_code=404, detail="Shortlist not found")
+
+
+@app.post("/api/shortlists/{sid}/source-live")
+def source_live_endpoint(sid: str, user: dict = Depends(current_user)) -> dict:
+    from app.accounts import mark_source_live
+
+    entry = mark_source_live(user["id"], sid)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Shortlist not found")
+    return {"shortlist": entry}
+
+
+@app.delete("/api/shortlists/{sid}", status_code=204)
+def delete_shortlist_endpoint(sid: str, user: dict = Depends(current_user)) -> None:
+    from app.accounts import delete_shortlist
+
+    if not delete_shortlist(user["id"], sid):
+        raise HTTPException(status_code=404, detail="Shortlist not found")
 
 
 @app.get("/")
