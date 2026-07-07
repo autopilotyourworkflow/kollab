@@ -82,3 +82,30 @@ output — nothing breaks in either direction.
 The static demo is independent of the live backend: redeploy the frontend
 without `VITE_API_URL` (or just delete the Render service) and the site falls
 back to the committed pipeline payload instantly.
+
+## 6. Post-deploy check: styling (CORS-variant cache poisoning)
+
+After a Pages deploy, confirm the site is **styled** — not just that assets
+`200`. A browser and `curl` can disagree:
+
+```bash
+# curl WITHOUT Origin (the default) can look fine while browsers break:
+curl -sI https://<host>/assets/index-<hash>.css | grep -i content-type   # text/css ✅
+# reproduce what a browser sends — an Origin header:
+curl -sI -H "Origin: https://<host>" https://<host>/assets/index-<hash>.css | grep -i content-type
+# if this returns text/html, the CORS cache variant is poisoned.
+```
+
+Cause: Vite stamps `crossorigin` on the emitted `<link>`/`<script>` tags, so
+browsers fetch them in CORS mode and send `Origin`. Cloudflare caches the CORS
+response under a **separate variant**. During a deploy's edge-propagation gap a
+CORS request for a not-yet-live hashed asset can be answered with the SPA
+fallback `index.html` (`200 text/html`) and cached hard by the `_headers`
+`immutable` rule — so every real browser then gets HTML for a `.css` and renders
+unstyled, while `curl` (no `Origin`) sees the clean copy.
+
+Fix (already in `vite.config.ts`): a `strip-crossorigin-attrs` plugin drops the
+`crossorigin` attribute, so same-origin assets are plain (non-CORS) fetches that
+hit the reliable default cache variant and can't be poisoned this way. If a live
+site is already poisoned, purge the Cloudflare cache (dashboard → Caching → Purge)
+and redeploy from a build that includes this plugin.
