@@ -151,4 +151,8 @@ export interface ClientBrief {
   pillars: string[]
   region: string
   website: string
+  /** Content-topic phrases used to search TikTok for creators (e.g. "thai skincare"),
+      distinct from the display pillars (brand values). Populated by live Brand-DNA
+      extraction; empty otherwise (the backend then falls back to category/pillars). */
+  searchTerms?: string[]
 }

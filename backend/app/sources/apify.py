@@ -461,9 +461,21 @@ class ApifyAdapter(KOLSource):
 
 
 def search_queries_from_brief(brief: ClientBrief, max_queries: int = 3) -> list[str]:
-    """Brief -> a few short TikTok search queries: the category head plus the most
-    concrete pillars. Deliberately simple and inspectable — query strategy is a
-    calibration lever for the live run, not hidden magic."""
+    """Brief -> a few short TikTok search queries. Deliberately simple and inspectable —
+    query strategy is a calibration lever for the live run, not hidden magic.
+
+    PREFER the brief's explicit `search_terms`: content topics the brand-DNA extraction
+    picked for THIS product category (what creators actually post about). Only when none
+    were extracted do we fall back to the category head + pillars — and pillars are brand
+    VALUES ("innovation", "social responsibility"), which as search queries pull in
+    off-topic finance/business creators, so they're the last resort, not the default."""
+    terms = [t.strip().lower() for t in (brief.search_terms or []) if t and t.strip()]
+    if terms:
+        # de-dupe, preserve order
+        seen: set[str] = set()
+        deduped = [t for t in terms if not (t in seen or seen.add(t))]
+        return deduped[:max_queries]
+
     queries: list[str] = []
     head = brief.category.split("/")[0].strip().lower()
     if head:

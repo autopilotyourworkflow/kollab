@@ -17,7 +17,7 @@ import { cn } from "../lib/cn"
 import { startRun } from "../lib/api"
 import { apiBase } from "../lib/credit"
 import { plans, loadRunPlan, saveRunPlan, fromPreset } from "../lib/runPlan"
-import { addRun, WORKSPACE_UPDATED } from "../lib/runsStore"
+import { addRun, listRuns, WORKSPACE_UPDATED, RUNS_CHANGED } from "../lib/runsStore"
 import {
   getEntry,
   setDecision as persistDecision,
@@ -107,6 +107,14 @@ export function Shortlist() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
+  // Re-render the sourcing/empty state when a run for this shortlist starts or finishes.
+  const [runsTick, setRunsTick] = useState(0)
+  useEffect(() => {
+    const on = () => setRunsTick((x) => x + 1)
+    window.addEventListener(RUNS_CHANGED, on)
+    return () => window.removeEventListener(RUNS_CHANGED, on)
+  }, [])
+
   const [filter, setFilter] = useState<Filter>("all")
   const [sort, setSort] = useState<SortKey>("fit")
   const [showExport, setShowExport] = useState(false)
@@ -122,6 +130,15 @@ export function Shortlist() {
   const isMobile = useIsMobile()
 
   const kols = useMemo(() => entry?.kols ?? [], [entry])
+
+  // A brand-new live shortlist starts empty while its auto-started run sources brand-scored
+  // creators in the background (the run dock merges them in). Distinct from a filter emptying
+  // a populated shortlist.
+  const sourcing = useMemo(
+    () => kols.length === 0 && listRuns().some((r) => r.shortlistId === id && r.status === "running"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [kols.length, id, runsTick],
+  )
 
   const setDecision = (kolId: string, status: HitlStatus, reason?: string) => {
     if (!entry) return
@@ -263,8 +280,8 @@ export function Shortlist() {
               variant="secondary"
               leadingIcon={adding ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
               onClick={addMore}
-              disabled={!canAdd || adding}
-              title={canAdd ? "Source & vet more creators into this shortlist" : "No more demo creators here — connect to the Kollab backend to source live"}
+              disabled={!canAdd || adding || sourcing}
+              title={sourcing ? "A sourcing run is already filling this shortlist" : canAdd ? "Source & vet more creators into this shortlist" : "No more demo creators here — connect to the Kollab backend to source live"}
             >
               {adding ? "Starting…" : "Add more"}
             </Button>
@@ -348,6 +365,48 @@ export function Shortlist() {
         </button>
       )}
 
+      {kols.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-white px-6 py-16 text-center shadow-sm">
+          {sourcing ? (
+            <>
+              <span className="grid h-12 w-12 place-items-center rounded-full bg-brand-50 text-brand">
+                <Loader2 size={22} className="animate-spin" />
+              </span>
+              <div className="text-[15px] font-semibold text-ink">Sourcing creators for {entry.brief.brand}…</div>
+              <p className="max-w-md text-[13px] leading-relaxed text-ink-500">
+                Kollab is searching TikTok and vetting matches against this brand's brief — brand-fit and
+                authenticity are scored for {entry.brief.brand}, not carried over from another shortlist. This takes
+                a few minutes; results merge in automatically. You can leave this page — follow it in the run dock
+                (bottom-right).
+              </p>
+            </>
+          ) : (
+            <>
+              <span className="grid h-12 w-12 place-items-center rounded-full bg-panel text-ink-400">
+                <SearchX size={22} />
+              </span>
+              <div className="text-[15px] font-semibold text-ink">No creators yet</div>
+              <p className="max-w-md text-[13px] leading-relaxed text-ink-500">
+                {canAdd
+                  ? `Source and vet creators for ${entry.brief.brand} — each one is scored against this brand's own brief.`
+                  : "Connect to the Kollab backend to source and vet creators for this brand."}
+              </p>
+              {canAdd && (
+                <Button
+                  size="sm"
+                  className="mt-1"
+                  leadingIcon={adding ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+                  onClick={addMore}
+                  disabled={adding}
+                >
+                  {adding ? "Starting…" : "Source creators"}
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        <>
       {/* Mobile/tablet search */}
       <div className="relative mb-3 lg:hidden">
         <SearchIcon size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-400" />
@@ -513,6 +572,8 @@ export function Shortlist() {
         adapter at a licensed KOL feed. Fraud-flagged handles are anonymised in the live run. Decisions and added
         creators are saved to this shortlist automatically.
       </p>
+        </>
+      )}
 
       <AnimatePresence>
         {showExport && (

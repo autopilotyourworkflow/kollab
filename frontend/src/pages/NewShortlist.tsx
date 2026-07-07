@@ -21,6 +21,8 @@ import { client, brandDna, kols as demoKols, summary as demoSummary, cost as dem
 import { authHeaders } from "../lib/credentials"
 import { apiBase, fetchCredit, runExceedsCredit, type CreditInfo } from "../lib/credit"
 import { createEntry } from "../lib/workspace"
+import { startRun } from "../lib/api"
+import { addRun } from "../lib/runsStore"
 import type { ClientBrief } from "../lib/types"
 import {
   defaultCap,
@@ -43,7 +45,7 @@ type LiveExtraction = { brand: string; brandTh: string; category: string; source
     honestly-degraded rules skeleton — the UI then keeps its labeled demo path. */
 async function tryLiveBrandDna(website: string, text?: string): Promise<{
   live: LiveExtraction | null
-  brief?: { audience?: string; region?: string; pillars?: string[]; tone?: string }
+  brief?: { audience?: string; region?: string; pillars?: string[]; tone?: string; searchTerms?: string[] }
 }> {
   // Only when a live backend is configured — the static demo hosting has no
   // /api/brand-dna, so probing it would just log 404 noise.
@@ -65,7 +67,7 @@ async function tryLiveBrandDna(website: string, text?: string): Promise<{
     const data = (await res.json()) as {
       degraded?: boolean
       source?: string
-      brief?: { brand?: string; brandTh?: string; category?: string; audience?: string; region?: string; pillars?: string[]; tone?: string }
+      brief?: { brand?: string; brandTh?: string; category?: string; audience?: string; region?: string; pillars?: string[]; tone?: string; searchTerms?: string[] }
     }
     if (data?.degraded === false && typeof data.brief?.brand === "string" && data.brief.brand) {
       return {
@@ -135,6 +137,9 @@ export function NewShortlist() {
   const [tone, setTone] = useState(brandDna.tone)
   const [region, setRegion] = useState(client.region)
   const [pillars, setPillars] = useState<string[]>(client.pillars)
+  // TikTok content search-terms from live extraction (drives creator sourcing; distinct
+  // from the display pillars). Empty unless a live brand is extracted.
+  const [searchTerms, setSearchTerms] = useState<string[]>([])
   const [addingPillar, setAddingPillar] = useState(false)
   const [pillarDraft, setPillarDraft] = useState("")
   const addPillarRef = useRef<HTMLButtonElement>(null)
@@ -223,6 +228,7 @@ export function NewShortlist() {
       if (result.brief.region) setRegion(result.brief.region)
       if (result.brief.pillars?.length) setPillars(result.brief.pillars)
       setTone(result.brief.tone || "") // extracted tone (or clear the demo default on a live brand)
+      setSearchTerms(result.brief.searchTerms || []) // content topics that drive creator sourcing
     }
     if (result.live) {
       setNoGo([]) // the no-go list is the AM's call, not scraped — start empty on a live brand
@@ -775,9 +781,6 @@ export function NewShortlist() {
                 if (creating) return
                 setCreateError(null)
                 setCreating(true)
-                // Create the shortlist (its own campaign in the workspace) from the
-                // edited brief + this run's results, then run the pipeline animation
-                // which lands on the new shortlist's page.
                 const brief: ClientBrief = {
                   brand: live?.brand ?? client.brand,
                   brandTh: live?.brandTh ?? client.brandTh,
@@ -786,15 +789,46 @@ export function NewShortlist() {
                   pillars,
                   region,
                   website: url.trim() || client.website,
+                  // Drives live creator search (falls back to category/pillars if empty).
+                  searchTerms: searchTerms.length ? searchTerms : undefined,
                 }
                 try {
+                  saveRunPlan(plan)
+                  // Live backend: create an EMPTY shortlist and auto-start a real sourcing
+                  // run. Brand-scored creators merge in through the run dock (~minutes) — we
+                  // never seed a new brand with another brand's demo cohort or its fit scores.
+                  if (apiBase()) {
+                    const entry = await createEntry(brief, [], {
+                      source: "fixtures",
+                      screened: 0,
+                      cost: { usd: 0, seconds: 0, cacheHitRate: 0 },
+                      commenterOverlap: [],
+                    })
+                    const runPreset = plan.key === "custom" ? plans.defaultPreset : plan.key
+                    const runId = await startRun(brief, runPreset)
+                    if (runId) {
+                      addRun({
+                        id: runId,
+                        shortlistId: entry.id,
+                        brand: brief.brand,
+                        preset: runPreset,
+                        startedAt: Date.now(),
+                        status: "running",
+                      })
+                    }
+                    // Lands on the shortlist: it shows a "sourcing…" state while the run
+                    // fills it, or an empty "Source creators" state if the run couldn't start.
+                    navigate(`/app/s/${entry.id}`)
+                    return
+                  }
+                  // Offline static demo (no backend): the labeled demo cohort stands in, via
+                  // the pipeline animation which lands on the new shortlist's page.
                   const entry = await createEntry(brief, demoKols, {
                     source: "fixtures",
                     screened: demoSummary.screened,
                     cost: demoCost,
                     commenterOverlap: demoOverlap,
                   })
-                  saveRunPlan(plan)
                   navigate(`/app/run?id=${entry.id}`)
                 } catch {
                   setCreateError("Couldn't save the shortlist. Check your connection and try again.")

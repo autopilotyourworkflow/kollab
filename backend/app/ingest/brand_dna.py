@@ -37,11 +37,17 @@ Return STRICT JSON only (no prose, no code fence) with exactly these keys:
   "audience" — one short line describing the target customer, grounded in the page
   "tone"     — one short line describing the brand's tone / voice, inferred from the copy
   "pillars"  — array of 3-5 short content-pillar strings grounded in the page
+  "searchTerms" — array of 3-5 SHORT phrases to search TikTok with to find creators who
+      make content for this brand's product category. These are content TOPICS people post
+      about (e.g. "thai skincare", "makeup review", "clean beauty", "รีวิวสกินแคร์"), NOT
+      the brand's values or slogans. Prefer 2-3 words, mix English and Thai, and lean on
+      the product category + audience — never abstract values like "innovation" or "trust".
   "region"   — geographic focus if stated, else ""
   "website"  — "{url}"
 
 Rules: never invent facts that are not supported by the page text; leave a field ""
-(or a shorter pillars list) rather than guessing.
+(or a shorter list) rather than guessing. searchTerms is the exception — always give the
+best category-based content topics even if the page is thin, since it drives creator search.
 
 PAGE TEXT:
 {text}
@@ -151,6 +157,7 @@ def _parse_brief_json(raw: str, website: str) -> ClientBrief:
     data.setdefault("brandTh", "")
     data.setdefault("region", "")
     data.setdefault("tone", "")
+    data.setdefault("searchTerms", [])
     return ClientBrief.model_validate(data)
 
 

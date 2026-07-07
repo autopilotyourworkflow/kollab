@@ -158,6 +158,11 @@ class ClientBrief(CamelModel):
     region: str
     website: str
     tone: str = ""  # brand voice, inferred from the site copy (advisory; may be "")
+    # Content-topic phrases to SEARCH TikTok with (what creators for this brand actually
+    # post about — e.g. "thai skincare", "beauty review"), separate from the display
+    # pillars, which are brand values and make poor search queries. Empty => the sourcing
+    # query builder falls back to category/pillars. See search_queries_from_brief().
+    search_terms: list[str] = []
 
 
 class CostMeter(CamelModel):

@@ -200,8 +200,15 @@ def test_apify_loop_honors_cancel_before_comment_spend():
 
 
 def test_search_queries_and_inference_helpers():
+    # No explicit search_terms -> fall back to the category head + concrete pillars.
     assert search_queries_from_brief(BRIEF) == ["skincare", "ingredient education",
                                                 "sensitive-skin friendly"]
+    # Explicit content search-terms take precedence (brand VALUES never reach the search).
+    branded = BRIEF.model_copy(update={
+        "pillars": ["Social responsibility", "Innovation and value"],
+        "search_terms": ["Thai Skincare", "beauty review", "thai skincare"],  # note dup + case
+    })
+    assert search_queries_from_brief(branded) == ["thai skincare", "beauty review"]
     assert infer_tier(45_000) == "micro"
     assert infer_tier(250_000) == "mid"
     assert infer_tier(600_000) == "macro"
