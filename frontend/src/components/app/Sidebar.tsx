@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Sparkles, Settings, LifeBuoy, LogOut, X } from "lucide-react"
+import { Sparkles, Settings, LifeBuoy, Code2, LogOut, X } from "lucide-react"
 import { Link } from "react-router-dom"
 import { cn } from "../../lib/cn"
 import { useAuth } from "../../context/AuthContext"
@@ -209,6 +209,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             >
               <LifeBuoy size={15} />
               <span className="text-[12px] font-medium">Guide</span>
+            </Link>
+            <Link
+              to="/tech"
+              onClick={onClose}
+              className="flex flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-ink-700 transition-colors hover:bg-surface hover:text-brand"
+              title="Engineering & architecture"
+            >
+              <Code2 size={15} />
+              <span className="text-[12px] font-medium">Tech</span>
             </Link>
           </div>
           <UserCard onNavigate={onClose} />

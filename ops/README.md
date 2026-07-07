@@ -58,7 +58,7 @@ URL directly in the **Fetch shortlist** node instead.
 - **Production trigger:** the Schedule node — every Monday 08:00, Asia/Bangkok
   (timezone is set in the workflow settings, not the server clock).
 - **Demo trigger:** the webhook — `GET https://<n8n-host>/webhook/kollab-revet` fires
-  the *identical* flow immediately, which is what makes an on-camera demo deterministic
+  the *identical* flow immediately, which is what makes a live demo deterministic
   instead of "wait until Monday."
 
 Use the webhook's **Production URL** (workflow active), not the editor's Test URL:

@@ -19,9 +19,9 @@ crossing the cap) and the server ceiling `KOLLAB_RUN_BUDGET_USD`.
 
 | depth | volumes | est. | default cap |
 |---|---|---|---|
-| Scan | 10 creators × 80 comments | ≈$0.66 | $1.00 |
-| Standard | 20 × 120 | ≈$1.71 | $2.25 |
-| Deep | 40 × 150 | ≈$3.77 | $4.75 |
+| Scan | 8 creators × 50 comments | ≈$0.28 | $0.50 |
+| Standard | 20 × 120 | ≈$1.33 | $1.75 |
+| Deep | 40 × 150 | ≈$3.20 | $4.00 |
 
 ## 2. Anthropic key (Brand DNA + citation-validated rerank)
 

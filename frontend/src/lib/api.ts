@@ -195,7 +195,7 @@ export function saveBrief(b: SavedBrief): void {
   }
 }
 
-// ── Overdelivery endpoints (all degrade gracefully with no backend) ──────────
+// ── Post-match endpoints (all degrade gracefully with no backend) ────────────
 
 export interface GraphStats {
   backend: string

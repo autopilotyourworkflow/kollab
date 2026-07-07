@@ -498,6 +498,12 @@ export function Landing() {
             </div>
             <div className="flex items-center gap-6 text-[13px] text-white/60">
               <Link
+                to="/tech"
+                className="inline-flex min-h-[44px] items-center transition-colors duration-300 hover:text-white"
+              >
+                Engineering
+              </Link>
+              <Link
                 to="/design-system"
                 className="inline-flex min-h-[44px] items-center transition-colors duration-300 hover:text-white"
               >

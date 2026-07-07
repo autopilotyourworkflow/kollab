@@ -29,7 +29,7 @@ const GUIDE: GuideSection[] = [
       "It is a decision/judgment layer, not a data source. KOL data (profiles, videos, comments) comes from a swappable adapter; Kollab's value is the vetting, matching, and ranking on top.",
       "The scraping adapter (Apify) is clearly labelled prototyping / public-data sampling only. The production target is a LICENSED feed (e.g. Tellscore, AnyMind, TikTok Creator Marketplace) behind the exact same interface — swapping it is a new adapter, not a rewrite.",
       "It flags for a human; it never auto-clears or auto-kills a creator. Every risk is routed to review with the evidence attached.",
-      "It is built as a production, SaaS-grade internal tool, not a throwaway demo — real persistence, honest error handling, health checks, and a 206-test backend suite.",
+      "It is built as a production, SaaS-grade internal tool, not a throwaway demo — real persistence, honest error handling, health checks, and a 245-test backend suite.",
     ],
   },
   {
@@ -252,6 +252,7 @@ const GUIDE: GuideSection[] = [
     intro: "The backend endpoints, all answering the honest-precondition contract.",
     points: [
       "GET /health — status, version, and feature flags. GET /api/db-status — a live SELECT 1.",
+      "POST /api/auth/signup · login · guest · GET /api/auth/me · POST /api/auth/logout — accounts + one-click guest (stdlib scrypt password hashing + HMAC session tokens). GET/POST /api/shortlists (+ per-id kols / decisions / source-live / DELETE) — the per-user workspace, current-user-gated (an honest 503 without a database).",
       "GET /api/shortlist — the demo shortlist (seed). POST /api/shortlist — run the pipeline for a brief. POST /api/runs + GET /api/runs/{id} + cancel — async background sourcing.",
       "POST /api/brand-dna — website to brief. GET /api/credit — the live credit meter. GET /api/run-plans — run-depth presets with costs.",
       "GET /api/graph — the persistent commenter-graph readout (aggregate counts + pods, no ids). POST /api/re-audit — delivered-post re-audit. GET/POST /api/deliveries — the delivery ledger. POST /api/outreach — the grounded outreach draft.",
@@ -263,9 +264,9 @@ const GUIDE: GuideSection[] = [
     title: "24. What's durable vs what's in your browser",
     intro: "An honest map of where each piece of state lives.",
     points: [
-      "Durable in Neon Postgres: async sourcing runs (so a run survives a refresh or the free instance sleeping), the persistent commenter graph (commenter_edges), and the delivery ledger (deliveries).",
-      "In your browser's local storage: the shortlists workspace (your campaigns, their creators, and your approve/reject decisions), the saved brief, the selected run depth, your CPM assumption, and your pasted API keys.",
-      "Why the workspace is browser-first: it works with zero backend, and on a shared public demo it gives each visitor their own isolated set of campaigns (no auth/tenant model yet). A production deployment with user accounts would move the workspace to Neon too — that is roadmap.",
+      "Durable in Neon Postgres: your account and — in API mode — your shortlists workspace (campaigns, their creators, and your approve/reject HITL decisions, user-scoped to your account), async sourcing runs (so a run survives a refresh or the free instance sleeping), the persistent commenter graph (commenter_edges), and the delivery ledger (deliveries).",
+      "In your browser's local storage: the saved brief, the selected run depth, your CPM assumption, and your pasted API keys — plus the whole shortlists workspace ONLY in the no-backend local mode, where it falls back to browser storage so the static demo never dead-ends.",
+      "Two modes, honestly: with a backend configured (the live demo), the workspace and your HITL decisions are Neon-durable and user-scoped — sign in, or take a private seeded workspace with one-click guest. With no backend, the same workspace transparently falls back to browser storage.",
       "Losing browser state is safe: the worst case is re-running a shortlist, never a wrong result.",
     ],
   },
@@ -283,16 +284,16 @@ const GUIDE: GuideSection[] = [
     id: "roadmap",
     title: "26. What's built vs roadmap",
     points: [
-      "Built: the full fraud-vetting engine, the persistent commenter graph, delivered-post re-audit, the closed delivery ledger, the fair-rate estimator, commenter-overlap dedup, the brand-safety scan, grounded outreach, the internal vetting report, the run-depth selector, the Brand DNA chain, the citation-validated rerank, bring-your-own-key, and this guide — all deployed live.",
-      "Roadmap: a first live calibration run against the real actors + a recorded live-extraction demo; embeddings/pgvector retrieval for recall at licensed-feed scale; a Neon-backed multi-tenant workspace + a native deal-pipeline board; a learned rate model from agency deal history; Thai-native validation of the taboo and pod lexicons.",
+      "Built: the full fraud-vetting engine, the persistent commenter graph, delivered-post re-audit, the closed delivery ledger, the fair-rate estimator, commenter-overlap dedup, the brand-safety scan, grounded outreach, the internal vetting report, the run-depth selector, the Brand DNA chain, the citation-validated rerank, bring-your-own-key, the authenticated Neon-backed workspace (accounts + per-user shortlists and HITL decisions), and this guide — all deployed live.",
+      "Roadmap: a first live calibration run against the real actors + a recorded live-extraction demo; embeddings/pgvector retrieval for recall at licensed-feed scale; a native deal-pipeline board; a learned rate model from agency deal history; Thai-native validation of the taboo and pod lexicons.",
     ],
   },
   {
     id: "quality",
     title: "27. Testing & quality",
     points: [
-      "206 hermetic backend tests (pytest) on synthetic data and fake clients cover every detector in both firing and silent cases, the withhold paths, the graph's cross-run recall lift, the rate math, the overlap invariants, the ledger, and the outreach allowlist.",
-      "The overdelivery work was pressure-tested by a multi-agent design review up front and an adversarial code review at the end (which found 9 issues, all fixed and re-tested).",
+      "245 hermetic backend tests (pytest) on synthetic data and fake clients cover every detector in both firing and silent cases, the withhold paths, the graph's cross-run recall lift, the rate math, the overlap invariants, the ledger, the auth + workspace routes, and the outreach allowlist.",
+      "Each feature was designed against its failure modes up front, then reviewed and re-tested before shipping.",
       "The frontend typechecks and builds clean; the committed pipeline payload keeps the demo, the API, and every on-screen number byte-identical by construction.",
     ],
   },
@@ -319,7 +320,7 @@ const GUIDE: GuideSection[] = [
       "Why is the fraud graph empty on the live site? It only accumulates from real runs; showing fabricated history would violate the whole thesis. Run one live scan to populate it, or read the mechanism above.",
       "Why does a flagged creator show a 0 rate? Its authenticity is near zero, so Kollab assesses the reach as non-organic and won't price it on reach — the fraud finding is the economics.",
       "Can Kollab guarantee a creator is clean? No. It surfaces structural evidence and withholds where the sample is too thin; a human makes the call. That honesty is the product.",
-      "Does it need API keys? No — the full demo runs credential-free. Keys unlock live sourcing, live Brand DNA, the LLM rerank, and the live overdelivery tools.",
+      "Does it need API keys? No — the full demo runs credential-free. Keys unlock live sourcing, live Brand DNA, the LLM rerank, and the live post-match tools.",
     ],
   },
 ]

@@ -11,6 +11,7 @@ import { PipelineRun } from "./pages/PipelineRun"
 import { Settings } from "./pages/Settings"
 import { Guide } from "./pages/Guide"
 import { DesignSystem } from "./pages/DesignSystem"
+import { Tech } from "./pages/Tech"
 import { AuthProvider, useAuth } from "./context/AuthContext"
 import { AuthGate } from "./pages/AuthGate"
 
@@ -70,6 +71,8 @@ function AnimatedRoutes() {
         </Route>
         <Route path="/design-system" element={<DesignSystem />} />
         <Route path="/system" element={<Navigate to="/design-system" replace />} />
+        <Route path="/tech" element={<Tech />} />
+        <Route path="/architecture" element={<Navigate to="/tech" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </motion.div>

@@ -83,7 +83,7 @@ include her), which is why she's the case to watch when the labels are re-drawn.
 ## Honesty notes
 
 - **Labeled solo, and worse.** The labels file says it plainly: *"provisional —
-  auto-drafted from the curated fixture story, TO BE RE-LABELED by Beam."* One rater, no
+  auto-drafted from the curated fixture story, TO BE RE-LABELED by a Thai-native rater."* One rater, no
   inter-rater agreement measured yet. The rubric describes the upgrade path: independent
   double-labeling, percent agreement + Cohen's kappa, adjudicate, fold the winning
   rationale back into the rubric as a named rule.

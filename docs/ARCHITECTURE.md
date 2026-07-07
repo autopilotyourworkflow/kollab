@@ -129,13 +129,28 @@ held data (`?exclude=@handle` adds explicit skips; `excludedKnown` in the respon
 the dedup). `KOLLAB_DB` relocates the file to a persistent volume; losing the history is
 safe — worst case is re-buying data, never wrong results.
 
+### `app/db.py` + `app/models.py` + `app/auth.py` + `app/accounts.py` — the durable multi-user workspace
+A SQLAlchemy `Base` (Neon Postgres in production, SQLite for local dev) with `Run`,
+`CommenterEdge`, `Delivery`, plus **`User`** and **`Shortlist`**; `init_db()` creates the
+tables and every DB import is lazy, so the credential-free demo never loads them.
+`auth.py` hashes passwords with stdlib **scrypt** and mints **HMAC-signed session tokens**
+(no server-side session store — a `current_user` dependency verifies them; a guest path
+issues a private seeded workspace). `accounts.py` is the per-user workspace layer: create /
+list / read shortlists, append KOLs, record HITL decisions, and mark a shortlist
+live-sourced — all user-scoped. Without a database every workspace route answers an honest
+`503`, and the frontend falls back to the offline browser store.
+
 ### `app/pipeline.py` + `app/main.py`
 `build_shortlist` wires it end-to-end and projects a real per-run cost from actual data volume
 using the verified Apify prices ($0.50/1k comments, $1.70/1k results). It prefers the dataset's
-own `as_of` date as "now" for deterministic recency. `main.py` exposes `/health`,
-`/api/shortlist` (GET default demo, POST with a brief; live-path preconditions answer 4xx/503
-with the reason) and `/api/brand-dna`, applies the LLM rerank when enabled, with CORS open to
-the Pages demo + localhost.
+own `as_of` date as "now" for deterministic recency. `main.py` exposes the full API: core
+(`/health`, `/api/shortlist` GET demo / POST brief, `/api/brand-dna`); async sourcing
+(`/api/runs` + `/{id}` + cancel, `/api/run-plans`, `/api/credit`, `/api/db-status`); the
+post-match tools (`/api/graph`, `/api/re-audit`, `/api/deliveries`, `/api/outreach`); and
+auth + workspace (`/api/auth/signup|login|guest|me|logout`, `/api/shortlists` CRUD + `/kols`
++ `/decisions/{id}` + `/source-live`). It applies the LLM rerank when enabled; live-path
+preconditions answer an honest 4xx/503 with the reason; CORS is open to the Pages demo +
+localhost.
 
 ## Reliability & degradation
 
@@ -153,7 +168,7 @@ the Pages demo + localhost.
 
 ## Testing
 
-201 tests (`backend/tests/`) on synthetic data + fake clients: run-depth plan math +
+245 tests (`backend/tests/`) on synthetic data + fake clients: run-depth plan math +
 frontend-parity enforcement, every detector (pod / burst /
 templated / thin / ER-outlier / view-to-follower / boosted / dormancy) in both firing and
 silent cases, the withhold paths (min-cohort AND min-video-sample), vetting dedup + ordering
@@ -162,7 +177,8 @@ dormancy not fraud-templated), the citation validator AND the LLM rerank against
 (citation-stripping, ghost-citation rejection, provider-failure survival), the Brand DNA
 degradation chain (Claude → Gemini → rules, unreachable-site case), the Apify actor loop
 against a fake client (assembly, tier/vertical inference, budget stop, refuse-before-spend),
-the trust layer, seed determinism incl. realized-ER == descriptor, the Apify mappers (ISO +
+the auth core (scrypt password hashing + HMAC session-token round-trip) and the
+signup/login/guest + per-user shortlists CRUD API, the trust layer, seed determinism incl. realized-ER == descriptor, the Apify mappers (ISO +
 epoch + dropped-unstamped cases), the 503/400 precondition answers, and an end-to-end
 pipeline assertion that the seed shortlist reproduces the deployed UI's exact risk story and
 emits the camelCase contract.
@@ -175,4 +191,4 @@ emits the camelCase contract.
   Gemini strictly as a degradation fallback — fewer integration surfaces; Claude-vs-Gemini
   as a quality A/B on the rerank rubric is a v1 lever, noted rather than built now.
 - **Determinism everywhere in fixtures mode.** Seeded RNG + dataset `as_of` → reproducible
-  output, which is what makes the test suite meaningful and the demo dependable on camera.
+  output, which is what makes the test suite meaningful and the demo dependable.

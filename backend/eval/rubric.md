@@ -74,7 +74,7 @@ Every label carries a `reason` that must:
 ## Solo now — how this scales to multiple raters
 
 Current state: one labeler (and worse, labels auto-drafted from the fixture story —
-marked provisional in `labels.glow-lab.json`, to be re-labeled by Beam by hand).
+marked provisional in `labels.glow-lab.json`, to be re-labeled by a Thai-native rater by hand).
 
 To make the labels defensible:
 

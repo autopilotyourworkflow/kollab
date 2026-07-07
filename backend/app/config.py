@@ -110,12 +110,13 @@ def _env_float(name: str, default: float) -> float:
 
 @dataclass(frozen=True)
 class Settings:
-    # Candidate source: "seed" (fixtures) or "apify" (live public-data sampling —
-    # the adapter seam exists but the actor-run loop is roadmap; the API answers 503).
+    # Candidate source: "seed" (fixtures) or "apify" (live public-data sampling via
+    # the budget-capped ApifyAdapter actor-run loop; a run with no key is an honest 503).
     source: str = field(default_factory=lambda: os.getenv("KOLLAB_SOURCE", "seed"))
 
     # Optional credentials — read and surfaced in /health. The live paths they
-    # unlock (Apify actor loop, LLM Brand-DNA/rerank) are roadmap; see README.
+    # unlock (Apify actor loop, LLM Brand-DNA + citation-validated rerank) are
+    # implemented and token-activated — honest 4xx/503 only when a key is absent.
     apify_token: str | None = field(default_factory=lambda: os.getenv("APIFY_TOKEN") or None)
     anthropic_api_key: str | None = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY") or None)
     gemini_api_key: str | None = field(default_factory=lambda: os.getenv("GEMINI_API_KEY") or None)

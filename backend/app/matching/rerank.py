@@ -3,7 +3,7 @@
 The rerank prompt passes ENUMERATED data-point IDs and the model may cite only
 those. After the model answers, the validator checks every citation against the
 allowed set and rejects/retries any uncited claim — a checkable invariant, not
-"the LLM said so". This is the rigor flex demoed on camera (Loom beat 4b): the
+"the LLM said so": the
 model tries to cite a point not in the payload and the validator catches it.
 
 `apply_llm_rerank` upgrades the top of a finished shortlist: for each KOL it
