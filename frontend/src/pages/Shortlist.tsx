@@ -264,7 +264,7 @@ export function Shortlist() {
               leadingIcon={adding ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
               onClick={addMore}
               disabled={!canAdd || adding}
-              title={canAdd ? "Source & vet more creators into this shortlist" : "No more demo creators — deploy the backend to source live"}
+              title={canAdd ? "Source & vet more creators into this shortlist" : "No more demo creators here — connect to the Kollab backend to source live"}
             >
               {adding ? "Starting…" : "Add more"}
             </Button>

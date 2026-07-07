@@ -1,8 +1,9 @@
 # Go-live runbook
 
-Everything in this repo runs credential-free (the deployed demo proves it). This
-runbook takes the same code live: real sourcing, real LLM extraction, real
-per-request compute. Total hands-on time ≈ 20 minutes. Keys go in environment
+Everything in this repo *also* runs credential-free — build the frontend without
+`VITE_API_URL` and it serves the committed pipeline output with no keys. This runbook
+is the procedure that already took the same code live (Render + Neon): real sourcing,
+real LLM extraction, real per-request compute. Total hands-on time ≈ 20 minutes. Keys go in environment
 variables only — never in the repo, never in a chat.
 
 ## 1. Apify token (live TikTok sourcing)

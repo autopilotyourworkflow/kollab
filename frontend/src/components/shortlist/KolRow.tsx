@@ -413,11 +413,12 @@ function EvidencePanel({
                   >
                     Reject
                   </Button>
-                  {/* fixture profiles have no live TikTok account — say so instead of 404ing */}
+                  {/* No public profile link: the seed cohort uses fictional handles (would 404),
+                      and fraud-flagged live creators are anonymised — so we never link out. */}
                   <span
                     className="grid h-8 w-8 cursor-help place-items-center rounded-md border border-dashed border-border-strong text-ink-400"
-                    title="Fixture profile — no live TikTok account in the demo. The live run links real profiles."
-                    aria-label="Fixture profile — no live TikTok account in the demo"
+                    title="No public profile link — the seed cohort uses fictional handles, and fraud-flagged live creators are anonymised."
+                    aria-label="No public profile link"
                   >
                     <ExternalLink size={15} />
                   </span>

@@ -110,9 +110,9 @@ function CreditMeter({ credit, loading, onRefresh }: { credit: CreditInfo | null
       <div className="flex items-start gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-3 text-[12px] leading-relaxed text-ink-700">
         <Lock size={15} className="mt-0.5 shrink-0 text-ink-400" />
         <span>
-          <span className="font-semibold text-ink">Demo mode.</span> Live credit appears here once Kollab is connected to
-          its backend. Your keys are still saved in this browser now and will be used automatically the moment the live
-          app is deployed.
+          <span className="font-semibold text-ink">Offline preview.</span> This build isn't connected to a Kollab
+          backend, so there's no live credit to show. Your keys are saved in this browser and are sent to the Kollab
+          API automatically once it's connected.
         </span>
       </div>
     )

@@ -10,7 +10,7 @@ function UserCard({ onNavigate }: { onNavigate: () => void }) {
   const { user, mode, logout } = useAuth()
   const isGuest = !!user?.isGuest
   const title = mode === "local" ? "Offline demo" : isGuest ? "Guest workspace" : "Signed in"
-  const sub = mode === "local" ? "no account needed" : isGuest ? "Explore the demo" : user?.email ?? "your account"
+  const sub = mode === "local" ? "no account needed" : isGuest ? "Exploring as a guest" : user?.email ?? "your account"
   const initial = (user?.email?.[0] ?? (isGuest ? "G" : "K")).toUpperCase()
   return (
     <div className="flex items-center gap-2.5 rounded-xl bg-surface px-2.5 py-2">

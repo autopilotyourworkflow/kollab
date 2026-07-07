@@ -633,7 +633,7 @@ export function Tech() {
                   },
                   {
                     h: "Render",
-                    b: "The FastAPI service (one-click render.yaml). Point VITE_API_URL at it for live per-request compute; the live paths switch on with keys.",
+                    b: "The FastAPI service (one-click render.yaml). This deployment's frontend is built with VITE_API_URL pointed here, so it runs live per-request compute — Brand DNA and the citation-validated rerank are live (keys set).",
                   },
                   {
                     h: "Neon",

@@ -2,7 +2,7 @@
 
 **Not a scraper, not a database — the brand-fit and vetting brain that turns a licensed KOL feed into a shortlist an account manager can defend to a client.**
 
-🟢 **Live demo:** https://kollab-64c.pages.dev &nbsp;·&nbsp; served by the pipeline's own output over HTTP (`/api/shortlist`), zero rate-limit risk, a real result in <60s.
+🟢 **Live demo:** https://kollab-64c.pages.dev &nbsp;·&nbsp; wired to the live FastAPI backend (Render) + Neon — a real auth gate (sign in or one-click guest), live Brand-DNA extraction (Claude), and a per-user workspace. The seed shortlist renders the pipeline's own committed output (`/api/shortlist`): a real result in <60s.
 
 > Built for Convert Cake's influencer team as an AI-Engineer take-home. `KOL + Collab = Kollab`.
 
@@ -55,7 +55,7 @@ Every threshold is a named, documented, retunable constant (`app/fraud/signals.p
 
 ## Live vs. computed
 
-The frontend fetches `GET /api/shortlist` over HTTP and renders whatever the pipeline computed — every count, badge, and rationale on screen derives from that payload (the footer names the active source). On the hosted demo the endpoint is a Cloudflare Pages Function serving the **Python pipeline's own output** (regeneration command documented in `frontend/functions/api/shortlist.ts`); point `VITE_API_URL` at a running FastAPI instance (see `render.yaml`) for live per-request compute. If the API is unreachable, the bundled fallback keeps the demo alive — and it **imports the same committed payload the Function serves**, so fallback and API are byte-identical by construction. The fraud verdicts are computed **from first principles** on Apify-shaped data (see the 254-test suite); the live Apify pull runs behind the same `KOLSource` interface (budget-capped loop + mappers, tested against a fake client; first live run = calibration), and a licensed feed is one more adapter.
+The frontend fetches `GET /api/shortlist` over HTTP and renders whatever the pipeline computed — every count, badge, and rationale on screen derives from that payload (the footer names the active source). The hosted frontend is built with `VITE_API_URL` pointed at the live FastAPI backend (see `render.yaml`), so `GET /api/shortlist` is served by the running backend (the pipeline's own committed output on the seed cohort) and `/app/new` runs live per-request Brand-DNA extraction; with no `VITE_API_URL` set, the endpoint is instead a Cloudflare Pages Function serving that same committed output (regeneration command documented in `frontend/functions/api/shortlist.ts`). If the API is unreachable, the bundled fallback keeps the demo alive — and it **imports the same committed payload the Function serves**, so fallback and API are byte-identical by construction. The fraud verdicts are computed **from first principles** on Apify-shaped data (see the 254-test suite); the live Apify pull runs behind the same `KOLSource` interface (budget-capped loop + mappers, tested against a fake client; first live run = calibration), and a licensed feed is one more adapter.
 
 ## Architecture
 

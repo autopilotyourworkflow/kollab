@@ -204,7 +204,7 @@ function Outreach({ kol, brief }: { kol: Kol; brief: ClientBrief }) {
         </Button>
       )}
       {tried && !loading && !draft && (
-        <p className="text-[12px] text-ink-500">Outreach drafting runs on the backend — connect the API to try it.</p>
+        <p className="text-[12px] text-ink-500">Outreach drafting runs on the backend. {apiBase() ? "Couldn't reach it just now — try again." : "Connect the API to try it."}</p>
       )}
       {draft && (
         <div>

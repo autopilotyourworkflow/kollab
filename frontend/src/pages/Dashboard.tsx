@@ -222,8 +222,8 @@ export function Dashboard() {
 
       <p className="mt-6 flex items-center gap-1.5 text-[11px] text-ink-500">
         <ShieldAlert size={12} className="text-ink-400" />
-        Shortlists are saved in this browser. Each one accumulates creators as you run again — new results are vetted and
-        merged, never duplicated.
+        Shortlists are saved to your Kollab workspace. Each one accumulates creators as you run again — new results are
+        vetted and merged, never duplicated.
         <button onClick={() => navigate("/app/new")} className="ml-1 inline-flex items-center gap-0.5 font-medium text-brand hover:underline">
           Add one <ArrowRight size={11} />
         </button>

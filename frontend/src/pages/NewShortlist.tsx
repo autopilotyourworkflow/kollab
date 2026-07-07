@@ -109,6 +109,11 @@ export function NewShortlist() {
   const [showFb, setShowFb] = useState(false)
   const [fbText, setFbText] = useState("")
   const known = url.toLowerCase().includes("glowlab")
+  // Is this build pointed at a live Kollab backend (with the LLM key)? The deployed
+  // product is; a keyless static build isn't. Governs the honest "why no live
+  // extraction" copy below — a wired site that can't read a brand blocked our reader,
+  // it did NOT run out of keys.
+  const wired = !!apiBase()
 
   // editable brand DNA (HITL on the brief)
   const [audience, setAudience] = useState(client.audience)
@@ -351,7 +356,7 @@ export function NewShortlist() {
               </span>
             ) : (
               <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-risk-med-bg px-2 py-0.5 text-[11px] font-medium text-risk-med-fg">
-                <AlertTriangle size={12} /> draft brief — live extraction unavailable here
+                <AlertTriangle size={12} /> {wired ? "draft — couldn't auto-read this site" : "draft — offline preview"}
               </span>
             )}
           </div>
@@ -363,10 +368,20 @@ export function NewShortlist() {
             <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-risk-med-border bg-risk-med-bg px-3.5 py-2.5">
               <AlertTriangle size={16} className="mt-0.5 shrink-0 text-risk-med-fg" />
               <p className="text-[12px] leading-relaxed text-ink-700">
-                <span className="font-semibold text-risk-med-fg">Demo boundary.</span> Live extraction for arbitrary
-                brands runs on the backend's Claude → Gemini path (<code>POST /api/brand-dna</code> with an LLM key) —
-                this hosted demo doesn't carry keys, so the fields below are the sample brief, shown so you can see
-                and edit the review flow. Treat every value as a draft.
+                {wired ? (
+                  <>
+                    <span className="font-semibold text-risk-med-fg">Couldn't auto-read {url || "this site"}.</span>{" "}
+                    Live extraction ran, but the site blocked our reader or returned no usable text — many brand sites
+                    block automated fetches. The fields below are a starting draft: edit them (or paste the brand
+                    details), then find matching KOLs.
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold text-risk-med-fg">Offline preview.</span> This build isn't pointed
+                    at a Kollab backend, so live Brand-DNA extraction (<code>POST /api/brand-dna</code>) isn't reachable
+                    here. The fields below are a sample brief, shown so you can see and edit the review flow.
+                  </>
+                )}
               </p>
             </div>
           )}
@@ -490,7 +505,7 @@ export function NewShortlist() {
                 Run depth &amp; budget
               </span>
               <span className="text-[11px] text-ink-400">
-                priced from live actor rates · the hosted demo runs on fixtures
+                priced from live actor rates · this first shortlist previews on fixtures
               </span>
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4" role="radiogroup" aria-label="Run depth">
