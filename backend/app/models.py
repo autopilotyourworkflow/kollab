@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -97,3 +97,49 @@ class Delivery(Base):
             "note": self.note,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class User(Base):
+    """An account. Real accounts carry a normalized email + scrypt password_hash; a guest
+    (one-click 'Explore the demo') carries neither. Owns a set of Shortlists."""
+
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True)  # uuid4().hex
+    email = Column(String, nullable=True, unique=True, index=True)  # normalized; NULL for guests
+    password_hash = Column(String, nullable=True)  # scrypt string; NULL for guests
+    is_guest = Column(Boolean, nullable=False, default=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    last_seen_at = Column(DateTime(timezone=True), default=_utcnow, index=True)  # for guest reaping
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "email": self.email,
+            "isGuest": bool(self.is_guest),
+            "createdAt": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class Shortlist(Base):
+    """A saved campaign shortlist, owned by a user. `data` is the verbatim frontend
+    ShortlistEntry document (camelCase JSON — jsonb on Postgres); the backend never
+    queries inside it, so a single blob column mirrors the Run.result / Delivery pattern.
+    The authoritative id/createdAt/updatedAt are the columns, overlaid onto the blob."""
+
+    __tablename__ = "shortlists"
+
+    id = Column(String, primary_key=True)  # uuid4().hex (server-issued)
+    user_id = Column(String, nullable=False, index=True)
+    data = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (Index("ix_shortlists_user_updated", "user_id", "updated_at"),)
+
+    def to_entry(self) -> dict:
+        e = dict(self.data or {})
+        e["id"] = self.id
+        e["createdAt"] = int(self.created_at.timestamp() * 1000) if self.created_at else None
+        e["updatedAt"] = int(self.updated_at.timestamp() * 1000) if self.updated_at else None
+        return e
