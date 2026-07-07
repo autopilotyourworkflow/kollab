@@ -14,7 +14,14 @@ import {
 import { appendKols, markSourceLive } from "../../lib/workspace"
 import { cn } from "../../lib/cn"
 
-const STALE_MS = 12 * 60_000
+// How long the dock keeps polling a run before declaring it stale. This must exceed the
+// real wall-clock of the heaviest run: the TikTok search actor alone is a ~6-min fixed
+// cost, and a Deep run (40 creators) adds a batched comment scrape + a per-creator rerank
+// on the free Render tier — comfortably past 15 min. Set generously (25 min) so a run the
+// user is watching actually finishes and merges. Polling every 4s also keeps the free
+// instance awake, so cutting polling off early (the old 12 min) both gave up AND risked a
+// spin-down that killed the in-flight job. A user can always Stop manually before this.
+const STALE_MS = 25 * 60_000
 
 function elapsed(startedAt: number): string {
   const s = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
@@ -56,7 +63,7 @@ export function RunDock() {
         for (const r of listRuns()) {
           if (r.status !== "running") continue
           if (Date.now() - r.startedAt > STALE_MS) {
-            updateRun(r.id, { status: "error", error: "timed out" })
+            updateRun(r.id, { status: "error", error: "still running after 25 min — try a lighter depth (Scan) or re-run" })
             continue
           }
           const res = await pollRun(r.id)
