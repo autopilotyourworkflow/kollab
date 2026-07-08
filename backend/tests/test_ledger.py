@@ -64,17 +64,38 @@ def test_endpoints_503_without_db(monkeypatch):
     assert client.get("/api/deliveries", params={"handle": "@x"}).status_code == 503
 
 
+def _auth_header(client):
+    """Sign up and return an Authorization header (the ledger requires a signed-in user)."""
+    tok = client.post("/api/auth/signup",
+                      json={"email": "ledger@x.com", "password": "supersecret"}).json()["token"]
+    return {"Authorization": f"Bearer {tok}"}
+
+
 def test_endpoint_roundtrip_with_db(db):
     from fastapi.testclient import TestClient
     from app.main import app
     client = TestClient(app)
+    h = _auth_header(client)
     res = client.post("/api/deliveries", json={
         "brand": "Glow Lab", "handle": "@ploy.skinnote",
         "projectedViews": 50_000, "actualViews": 60_000,
-    })
-    assert res.status_code == 200
+    }, headers=h)
+    assert res.status_code == 200, res.text
     body = res.json()
     assert body["delivery"]["ratio"] == 1.2
     assert body["reliability"]["n"] == 1
-    listed = client.get("/api/deliveries", params={"handle": "@ploy.skinnote"}).json()
+    listed = client.get("/api/deliveries", params={"handle": "@ploy.skinnote"}, headers=h).json()
     assert len(listed["deliveries"]) == 1
+
+
+def test_delivery_endpoints_require_auth(db):
+    """With a DB but no bearer token, the ledger is not writable/readable anonymously — an
+    anonymous caller must not be able to inject a fabricated 'delivered N×' outcome that
+    would nudge everyone's fit scores."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    client = TestClient(app)
+    assert client.post("/api/deliveries", json={
+        "handle": "@x", "projectedViews": 1, "actualViews": 1,
+    }).status_code == 401
+    assert client.get("/api/deliveries", params={"handle": "@x"}).status_code == 401

@@ -145,9 +145,25 @@ def _to_iso(ts) -> str:
     rather than letting them crash the time-based detectors."""
     if ts is None or ts == "":
         return ""
+    # Unix epoch seconds (int/float or an all-digit string). Guard the conversion:
+    # an out-of-range epoch raises OverflowError/OSError/ValueError on some platforms,
+    # which must degrade to '' (drop the item), never crash the whole run.
     if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.isdigit()):
-        return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat().replace("+00:00", "Z")
-    return str(ts)
+        try:
+            return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        except (OverflowError, OSError, ValueError):
+            return ""
+    # An ISO string: honor the contract — return it only if it actually parses with the
+    # SAME parser every downstream detector uses; otherwise '' so assemble_kol drops it
+    # (a malformed stamp is unusable evidence, not a reason to 500 the re-audit/pipeline).
+    from app.raw import parse_iso  # local import: avoid a cycle at module load
+
+    candidate = str(ts)
+    try:
+        parse_iso(candidate)
+    except (ValueError, TypeError):
+        return ""
+    return candidate
 
 
 def _norm_url(url: str) -> str:
@@ -186,7 +202,16 @@ def parse_video_item(item: dict) -> RawVideo:
         collect_count=int(stats.get("collectCount") or 0),
         create_time_iso=_to_iso(item.get("createTimeISO") or item.get("createTime")),
         text=str(item.get("text") or ""),
-        hashtags=[h.get("name", h) if isinstance(h, dict) else h for h in item.get("hashtags", [])],
+        # Coerce every hashtag to a non-empty string: a dict without "name" (or a non-str
+        # element) must never reach the RawVideo(list[str]) field and fail validation,
+        # which would drop the whole creator. Empties are filtered out.
+        hashtags=[
+            t for t in (
+                (str(h.get("name") or h.get("title") or "").strip() if isinstance(h, dict) else str(h).strip())
+                for h in (item.get("hashtags") or [])
+            )
+            if t
+        ],
     )
 
 

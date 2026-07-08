@@ -310,8 +310,12 @@ def start_run_endpoint(
         )
     with _request_keys(x_apify_token, x_anthropic_key):
         s = get_settings()
-        apify = s.effective_apify_token
-        anthropic = s.effective_anthropic_api_key
+        # Only forward a visitor's OWN pasted key into the run thread. When the run would
+        # use the operator's shared/env key, pass None so the background thread re-resolves
+        # through keypool.acquire() — otherwise it pins the single legacy APIFY_TOKEN and
+        # skips the numbered-pool auto-rotation on exhaustion.
+        apify = s.effective_apify_token if request_override_present("apify_token") else None
+        anthropic = s.effective_anthropic_api_key if request_override_present("anthropic_api_key") else None
     from app.runs import start_run
 
     run_id = start_run(brief.model_dump(by_alias=True), preset, expand, exclude, apify, anthropic)
@@ -323,6 +327,11 @@ def get_run_endpoint(run_id: str) -> dict:
     """Poll a run: {status: queued|running|done|error|cancelled, result?, error?}.
     `result` is the camelCase ShortlistResponse the frontend merges once status is
     done. State lives in the DB, so a poll works after a refresh or a new session."""
+    if not database_url():
+        raise HTTPException(
+            status_code=503,
+            detail="Async runs need a database — set DATABASE_URL (Neon).",
+        )
     from app.runs import get_run
 
     run = get_run(run_id)
@@ -339,11 +348,20 @@ def cancel_run_endpoint(
 ) -> dict:
     """Stop a running job and abort its in-flight Apify actor so it stops spending.
     Idempotent: cancelling a finished run just returns it."""
+    if not database_url():
+        raise HTTPException(
+            status_code=503,
+            detail="Async runs need a database — set DATABASE_URL (Neon).",
+        )
     with _request_keys(x_apify_token, x_anthropic_key):
         token = get_settings().effective_apify_token
+    # In the recommended pool-only deploy (numbered APIFY_TOKEN_1..N, no legacy APIFY_TOKEN,
+    # no BYOK), `token` is None — the run leased a numbered key we don't hold here. Pass the
+    # whole env pool so the abort still fires on whichever account is running the actor.
+    pool_tokens = [tok for _label, tok in keypool.env_tokens()] if not token else []
     from app.runs import request_cancel
 
-    run = request_cancel(run_id, apify_token=token)
+    run = request_cancel(run_id, apify_token=token, apify_tokens=pool_tokens)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     return run
@@ -359,13 +377,19 @@ def run_plans() -> dict:
 @app.post("/api/brand-dna", response_model=BrandDnaResponse)
 def brand_dna(
     req: BrandDnaRequest,
+    request: Request,
     x_apify_token: str | None = Header(default=None),
     x_anthropic_key: str | None = Header(default=None),
 ) -> BrandDnaResponse:
     """Website → structured brief. Claude → Gemini → rules skeleton; the response
     names its source and flags degraded extraction — the UI badges it honestly. A
     visitor's own Claude key (X-Anthropic-Key header, from Settings) runs the
-    extraction on their credit; without any key it returns the labeled skeleton."""
+    extraction on their credit; without any key it returns the labeled skeleton.
+
+    This triggers a server-side fetch of the supplied URL, so it is rate-limited per client
+    (abuse / scan throttle) and the fetch is SSRF-guarded in the extractor (public hosts
+    only)."""
+    _rate_limit(request, "brand_dna", limit=20, window_s=300)
     with _request_keys(x_apify_token, x_anthropic_key):
         result = extract_brand_dna(req.website, text=req.text)
         return BrandDnaResponse(
@@ -397,9 +421,15 @@ def reaudit_endpoint(req: DeliveredPostRequest) -> DeliveryAudit:
 
 
 @app.post("/api/deliveries")
-def log_delivery_endpoint(req: DeliveryLogRequest) -> dict:
+def log_delivery_endpoint(req: DeliveryLogRequest,
+                          authorization: str | None = Header(default=None)) -> dict:
     """Log a campaign outcome (projected vs actual views) and return the row + the updated
-    reliability for that creator. Needs a database (503 without one, like /api/runs)."""
+    reliability for that creator. Needs a database (503 without one, like /api/runs).
+
+    Requires a signed-in user: a logged outcome feeds the creator's reliability, which nudges
+    fit scores — so it must never be writable anonymously (no fabricated 'delivered N×' from
+    an unauthenticated caller)."""
+    current_user(authorization)  # 401 without a valid token, 503 with no DB
     if not database_url():
         raise HTTPException(
             status_code=503,
@@ -412,9 +442,12 @@ def log_delivery_endpoint(req: DeliveryLogRequest) -> dict:
 
 
 @app.get("/api/deliveries")
-def list_deliveries_endpoint(handle: str = Query(...)) -> dict:
+def list_deliveries_endpoint(handle: str = Query(...),
+                             authorization: str | None = Header(default=None)) -> dict:
     """List a creator's logged deliveries + their reliability. Empty (learning state) until
-    the first delivery is logged. Needs a database (503 without one)."""
+    the first delivery is logged. Needs a database (503 without one). Requires a signed-in
+    user (the ledger is not public)."""
+    current_user(authorization)  # 401 without a valid token, 503 with no DB
     if not database_url():
         raise HTTPException(
             status_code=503,
@@ -450,8 +483,24 @@ from collections import defaultdict, deque
 _rl_buckets: dict[str, deque] = defaultdict(deque)
 
 
+def _client_ip(request: Request | None) -> str:
+    """The real client IP for rate-limiting. Prefers X-Forwarded-For's first hop (the
+    original client) when present — behind Render's proxy, request.client.host would
+    otherwise be the proxy for EVERY request, collapsing all clients into one bucket and
+    letting a single caller lock out login/signup/guest globally. (uvicorn is also started
+    with --proxy-headers so request.client.host is corrected; this is belt-and-suspenders.)"""
+    if request is None:
+        return "anon"
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    return request.client.host if request.client else "anon"
+
+
 def _rate_limit(request: Request | None, action: str, limit: int, window_s: int) -> None:
-    ip = (request.client.host if request and request.client else "anon")
+    ip = _client_ip(request)
     now = _time.time()
     dq = _rl_buckets[f"{action}:{ip}"]
     while dq and dq[0] < now - window_s:

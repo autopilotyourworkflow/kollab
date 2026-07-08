@@ -93,6 +93,9 @@ def test_full_workspace_lifecycle(client):
     app_res = client.post(f"/api/shortlists/{sid}/kols", headers=h,
                           json={"kols": [{"id": "b", "handle": "@b", "hitl": "pending"}]})
     assert app_res.json()["added"] == 1
+    # the appended creator must actually LAND in the list (not just report added:1)
+    after = client.get(f"/api/shortlists/{sid}", headers=h).json()["shortlist"]
+    assert {k["handle"] for k in after["kols"]} == {"@a", "@b"}
 
     assert client.put(f"/api/shortlists/{sid}/decisions/a", headers=h,
                       json={"status": "approved", "reason": "verified"}).status_code == 204

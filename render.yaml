@@ -10,7 +10,10 @@ services:
     rootDir: backend
     plan: free
     buildCommand: pip install -r requirements.txt && pip install -e .[live]
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # --proxy-headers + trusting the forwarding proxy makes request.client.host reflect the
+    # real client (via X-Forwarded-For) behind Render's load balancer, so the per-IP auth
+    # rate limiter buckets by actual client instead of lumping everyone under the proxy IP.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION

@@ -25,7 +25,7 @@ function buildSteps(screened: number, flagged: number, recommended: number, pill
     { key: "source", label: "Source candidates", running: "Querying Thai TikTok by category & hashtag", done: `${screened} creators found`, ms: 1300 },
     { key: "enrich", label: "Enrich profiles", running: "Reading recent videos, captions & engagement", done: `${screened} / ${screened} enriched`, ms: 1400 },
     { key: "vet", label: "Vet authenticity", running: "Comment pods · bought followers · view spikes", done: `${flagged} flagged for review`, ms: 1650, hero: true },
-    { key: "match", label: "Match & score", running: "Embedding retrieve → LLM rerank on brand fit", done: "weighted · normalized", ms: 1300 },
+    { key: "match", label: "Match & score", running: "Deterministic topic scoring → LLM rerank on brand fit", done: "weighted · normalized", ms: 1300 },
     { key: "rank", label: "Rank & explain", running: "Writing grounded rationales (TH / EN)", done: `${recommended} recommended`, ms: 1150 },
   ]
 }

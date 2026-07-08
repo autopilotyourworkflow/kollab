@@ -94,6 +94,32 @@ def test_apify_assemble_drops_unstamped_items():
 
 
 
+def test_to_iso_rejects_malformed_and_overflow():
+    # _to_iso must honor its contract: a valid ISO string or '' (never a value that later
+    # crashes parse_iso in the re-audit / time-based detectors).
+    from app.sources.apify import _to_iso
+
+    assert _to_iso("2026-06-01T00:00:00Z") == "2026-06-01T00:00:00Z"  # valid passes through
+    assert _to_iso("not-a-date") == ""                                # unparseable -> dropped
+    assert _to_iso("2026-13-45T99:99:99Z") == ""                      # out-of-range fields -> dropped
+    assert _to_iso(99999999999999999999) == ""                        # epoch overflow -> dropped, no crash
+    # and whatever it returns for a non-empty value must actually parse
+    for raw in ("2026-06-01T00:00:00Z", "1782950400"):
+        iso = _to_iso(raw)
+        assert iso == "" or parse_iso(iso)
+
+
+def test_apify_video_mapper_coerces_hashtag_dicts():
+    # A hashtag dict WITHOUT a 'name' key must not reach RawVideo(list[str]) and fail
+    # validation (which would drop the whole creator). It's coerced/dropped, never a crash.
+    v = parse_video_item({
+        "id": "v1", "stats": {"playCount": 100}, "createTimeISO": "2026-06-01T00:00:00Z",
+        "hashtags": [{"id": "1"}, {"name": "beauty"}, "skincare", {"title": "glow"}, {}],
+    })
+    assert v.hashtags == ["beauty", "skincare", "glow"]  # name/title kept, unnamed dropped
+    assert all(isinstance(h, str) for h in v.hashtags)
+
+
 def test_apify_requires_token():
     from tests.test_live_paths import BRIEF
 

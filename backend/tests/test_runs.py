@@ -88,6 +88,38 @@ def test_start_run_endpoint_requires_a_database(monkeypatch):
     assert r.status_code == 503 and "database" in r.json()["detail"].lower()
 
 
+def test_get_and_cancel_run_endpoints_503_without_db(monkeypatch):
+    # These endpoints hit the DB session; with no database they must answer an honest 503,
+    # not a bare 500 (RuntimeError from the session factory).
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    reset_db_cache()
+    client = TestClient(app_ref())
+    assert client.get("/api/runs/anything").status_code == 503
+    assert client.post("/api/runs/anything/cancel").status_code == 503
+
+
+def test_cancel_aborts_across_pool_when_no_single_token(sqlite_db, monkeypatch):
+    # Recommended pool-only deploy: numbered APIFY_TOKEN_1..N, no legacy APIFY_TOKEN, no BYOK.
+    # effective_apify_token is None, so cancel must still fire the abort across the env pool
+    # (each pool key is a separate account) — otherwise a cancelled run keeps billing.
+    monkeypatch.delenv("APIFY_TOKEN", raising=False)
+    monkeypatch.setenv("APIFY_TOKEN_1", "apify_api_pool1")
+    monkeypatch.setenv("APIFY_TOKEN_2", "apify_api_pool2")
+    monkeypatch.setenv("KOLLAB_SHARED_KEY", "1")
+
+    aborted: list[str] = []
+    import app.runs as runs_mod
+    monkeypatch.setattr(runs_mod, "_abort_running_apify", lambda tok: aborted.append(tok))
+
+    from app.runs import create_run
+    create_run("rp", brand="X", preset="scan", brief=None)
+    client = TestClient(app_ref())
+    r = client.post("/api/runs/rp/cancel")
+    assert r.status_code == 200 and r.json()["status"] == "cancelled"
+    # both pool keys got an abort attempt (best-effort across the accounts)
+    assert "apify_api_pool1" in aborted and "apify_api_pool2" in aborted
+
+
 def app_ref():
     from app.main import app
     return app

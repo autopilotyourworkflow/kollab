@@ -25,9 +25,9 @@ import ccLogo from "../assets/convertcake-logo.png"
  *  reviewer. It complements the in-app operating Guide (/app/guide, copy-as-
  *  Markdown): the Guide is the deep product reference; this page is the system
  *  view — stack, data flow, the honesty-by-construction decisions, and the
- *  fraud engine's auditable thresholds. Every number here is read straight from
- *  the shipping code (backend/app/fraud/signals.py, matching/score.py, the test
- *  suite) so it can never quietly drift from the product. */
+ *  fraud engine's auditable thresholds. The numbers here trace directly to the
+ *  shipping code (backend/app/fraud/signals.py, matching/score.py, the test suite)
+ *  and are checked against it at each release. */
 
 const LIVE_URL = "https://kollab-64c.pages.dev"
 
@@ -145,8 +145,8 @@ const STACK: { layer: string; choice: string; why: string }[] = [
   },
   {
     layer: "Testing",
-    choice: "pytest — 254 hermetic tests",
-    why: "Synthetic data + injected fake clients. Zero network, runs in under two seconds, deterministic by construction.",
+    choice: "pytest — 266 hermetic tests",
+    why: "Synthetic data + injected fake clients. Zero network, runs in seconds, deterministic by construction.",
   },
 ]
 
@@ -160,7 +160,7 @@ const PRINCIPLES: { icon: typeof ShieldCheck; title: string; body: string }[] = 
   {
     icon: FlaskConical,
     title: "Deterministic in fixtures mode",
-    body: "Per-handle seeded RNG plus the dataset's own as_of date as “now” — no Date.now(), no live randomness. That's what makes the 254-test suite meaningful and the demo byte-reproducible on every run.",
+    body: "Per-handle seeded RNG plus the dataset's own as_of date as “now” — no Date.now(), no live randomness. That's what makes the 266-test suite meaningful and the demo byte-reproducible on every run.",
   },
   {
     icon: Database,
@@ -348,7 +348,7 @@ export function Tech() {
           </p>
           <div className="mt-7 flex flex-wrap gap-2">
             {[
-              "254 tests, all green",
+              "266 tests, all green",
               "FastAPI · React 19 · Neon",
               "LLM-optional by design",
               "Live in < 60s",
@@ -597,8 +597,8 @@ export function Tech() {
             <SectionHeader id="testing" title="Testing & quality" icon={FlaskConical} />
             <div className="grid gap-3 sm:grid-cols-3">
               {[
-                { v: "254", l: "hermetic backend tests" },
-                { v: "~6s", l: "full suite, zero network" },
+                { v: "266", l: "hermetic backend tests" },
+                { v: "~9s", l: "full suite, zero network" },
                 { v: "0", l: "fabricated numbers on screen" },
               ].map((s) => (
                 <Card key={s.l} className="!p-5">

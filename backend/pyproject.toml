@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kollab-backend"
-version = "0.3.0"
+version = "0.3.2"
 description = "Brand-fit + fraud-vetting judgment layer for Thai TikTok KOLs."
 requires-python = ">=3.11"
 dependencies = [

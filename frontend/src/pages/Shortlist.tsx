@@ -73,16 +73,24 @@ export function Shortlist() {
   const { search, setSearch } = useOutletContext<AppContext>()
   const [entry, setEntry] = useState<ShortlistEntry | null>(null)
   const [loading, setLoading] = useState(true)
+  // Distinguish "not found" (getEntry resolved null -> a real 404) from a transient failure
+  // (getEntry threw -> e.g. a 5xx during a Render cold start / Neon wake). Only the former
+  // should bounce the user to the dashboard; the latter shows a retry instead of silently
+  // acting as if the shortlist doesn't exist.
+  const [loadError, setLoadError] = useState(false)
   // Load the current id; `aliveRef` invalidates an in-flight load when the id changes, so
   // a slow getEntry(A) resolving after navigating to B never renders A under B's URL.
   const aliveRef = useRef(0)
   const load = () => {
     const token = ++aliveRef.current
+    setLoadError(false)
     getEntry(id)
       .then((e) => {
         if (aliveRef.current === token) setEntry(e)
       })
-      .catch(() => {})
+      .catch(() => {
+        if (aliveRef.current === token) setLoadError(true)
+      })
       .finally(() => {
         if (aliveRef.current === token) setLoading(false)
       })
@@ -121,6 +129,7 @@ export function Shortlist() {
   const [adding, setAdding] = useState(false)
   const [justAdded, setJustAdded] = useState<number | null>(null)
   const [startedHint, setStartedHint] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
   // Run depth for the next "Add more" (expand) run — the per-run setting.
   const presets = plans.presets.filter((p) => p.key !== "custom")
   const [depthKey, setDepthKey] = useState<string>(() => {
@@ -165,8 +174,7 @@ export function Shortlist() {
       return
     }
     // Live -> start a background run and hand it to the dock (fire-and-forget). The
-    // dock polls, merges on done, and the run survives refresh/close. If it can't
-    // even start, fall back to the demo pool.
+    // dock polls, merges on done, and the run survives refresh/close.
     setAdding(true)
     try {
       const runId = await startRun(entry.brief, depthKey)
@@ -178,10 +186,14 @@ export function Shortlist() {
         setStartedHint(true)
         window.setTimeout(() => setStartedHint(false), 7000)
       } else {
-        const n = await appendDemoBatch(entry, DEMO_BATCH[depthKey] ?? 4)
-        setJustAdded(n)
-        window.setTimeout(() => setJustAdded(null), 4000)
-        load()
+        // The live run couldn't start (e.g. exhausted Apify credit / a backend hiccup).
+        // Do NOT silently inject fabricated demo-pool creators into a real backend
+        // shortlist — surface an honest error instead. (Demo creators only stand in when
+        // there is no backend at all, handled above.)
+        setAddError(
+          "Couldn't start a live sourcing run — check your Apify credit in Settings, or try again.",
+        )
+        window.setTimeout(() => setAddError(null), 8000)
       }
     } finally {
       setAdding(false)
@@ -215,7 +227,32 @@ export function Shortlist() {
         <Loader2 size={24} className="animate-spin text-brand" />
       </div>
     )
-  // A missing/deleted id sends the user back to the Dashboard rather than a blank page.
+  // A TRANSIENT failure (backend threw, e.g. a cold-start 5xx) — offer a retry rather than
+  // pretending the shortlist doesn't exist and bouncing to the dashboard.
+  if (loadError && !entry)
+    return (
+      <div className="grid min-h-[60svh] place-items-center px-6">
+        <div className="max-w-sm rounded-2xl border border-border bg-white p-6 text-center shadow-sm">
+          <div className="text-[15px] font-semibold text-ink">Couldn't load this shortlist</div>
+          <p className="mt-1 text-[13px] text-ink-500">
+            The workspace didn't respond — it may be waking up. Your shortlist is safe.
+          </p>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => { setLoading(true); load() }}>
+              Try again
+            </Button>
+            <Link
+              to="/app"
+              className="inline-flex items-center rounded-lg px-3 py-1.5 text-[13px] font-medium text-ink-500 transition-colors hover:text-brand"
+            >
+              All shortlists
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  // A missing/deleted id (a real 404 — getEntry resolved null) sends the user back to the
+  // Dashboard rather than a blank page.
   if (!entry) return <Navigate to="/app" replace />
 
   const c = counts(kols)
@@ -316,6 +353,16 @@ export function Shortlist() {
             {justAdded > 0
               ? `+${justAdded} new creator${justAdded === 1 ? "" : "s"} sourced, vetted, and merged — no duplicates.`
               : "No new creators to add right now."}
+          </motion.p>
+        )}
+        {addError && (
+          <motion.p
+            role="alert"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-2 text-[12px] font-medium text-risk-high-fg"
+          >
+            {addError}
           </motion.p>
         )}
 

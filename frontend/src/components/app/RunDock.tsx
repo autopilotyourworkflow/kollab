@@ -66,18 +66,28 @@ export function RunDock() {
             updateRun(r.id, { status: "error", error: "still running after 25 min — try a lighter depth (Scan) or re-run" })
             continue
           }
-          const res = await pollRun(r.id)
-          if (!res) continue
-          if (res.status === "done") {
-            const kols = res.kols ?? []
-            const added = await appendKols(r.shortlistId, kols)
-            if (added && kols.length) await markSourceLive(r.shortlistId)
-            updateRun(r.id, { status: "done", added })
-            announceWorkspaceUpdate(r.shortlistId) // after the awaited writes land
-          } else if (res.status === "error") {
-            updateRun(r.id, { status: "error", error: res.error ?? "run failed" })
-          } else if (res.status === "cancelled") {
-            updateRun(r.id, { status: "cancelled" })
+          // Each run is isolated: a transient failure merging ONE run's results (e.g. a 5xx
+          // while the DB/instance is waking) must not throw out of the whole poll cycle —
+          // that would leave the run stuck "running", skip sibling runs, and spam unhandled
+          // rejections. Caught here, the run simply stays "running" and retries next tick
+          // (appendKols dedups by handle server-side, so a retry after a partial write is
+          // safe); the 25-min stale guard above is the backstop.
+          try {
+            const res = await pollRun(r.id)
+            if (!res) continue
+            if (res.status === "done") {
+              const kols = res.kols ?? []
+              const added = await appendKols(r.shortlistId, kols)
+              if (added && kols.length) await markSourceLive(r.shortlistId)
+              updateRun(r.id, { status: "done", added })
+              announceWorkspaceUpdate(r.shortlistId) // after the awaited writes land
+            } else if (res.status === "error") {
+              updateRun(r.id, { status: "error", error: res.error ?? "run failed" })
+            } else if (res.status === "cancelled") {
+              updateRun(r.id, { status: "cancelled" })
+            }
+          } catch {
+            /* transient poll/merge failure — leave this run running to retry next cycle */
           }
         }
       } finally {

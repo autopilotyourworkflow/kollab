@@ -9,18 +9,20 @@ import { WORKSPACE_UPDATED } from "../../lib/runsStore"
 import { cn } from "../../lib/cn"
 import type { Density } from "./AppShell"
 
-/** Per-run cost + latency — Kollab's cost-discipline, always visible. The number
-    is the pipeline's own projection for pulling this cohort live (never invented). */
+/** Reference per-run cost + latency — Kollab's cost-discipline, always visible. The number
+    is the pipeline's own projection for pulling a reference cohort live through the data
+    adapter (never invented); it's a typical-run benchmark, not the viewed shortlist's own
+    cost (a fresh live shortlist's real cost shows on its pipeline-run screen). */
 function CostMeter() {
   const { cost } = useShortlist()
   return (
     <div
       className="hidden items-center gap-2 rounded-full bg-brand-50 px-3 py-1.5 md:flex"
-      title="Projected cost + wall-clock of pulling this shortlist live through the data adapter"
+      title="Reference projection: cost + wall-clock to pull a typical shortlist live through the data adapter (not the viewed shortlist's own cost)"
     >
       <Gauge size={14} className="text-brand" />
       <span className="tnum text-[12px] text-ink-700">
-        <span className="font-bold text-brand">${cost.usd.toFixed(2)}</span>
+        <span className="font-bold text-brand">~${cost.usd.toFixed(2)}</span>
         <span className="mx-1.5 text-brand-100">·</span>
         {cost.seconds.toFixed(1)}s
         <span className="mx-1.5 text-brand-100">·</span>

@@ -104,3 +104,29 @@ def test_settings_read_env_at_call_time(monkeypatch):
     monkeypatch.setenv("KOLLAB_MIN_COHORT_N", "21")
     r = client.get("/health")
     assert r.json()["min_cohort_n"] == 21
+
+
+def test_brand_dna_fetch_blocks_ssrf_targets():
+    # The website fetch is SSRF-guarded: attacker-supplied internal/loopback/metadata
+    # addresses must be refused before any request is issued — never used to reach internal
+    # services. A real network call must not happen for these (the guard fails closed).
+    from app.ingest.brand_dna import _url_is_safe
+
+    for unsafe in (
+        "http://127.0.0.1:6379/",
+        "http://169.254.169.254/latest/meta-data/",  # cloud metadata
+        "http://10.0.0.5/", "http://192.168.1.1/", "http://172.16.0.1/",
+        "https://localhost/", "http://[::1]/", "ftp://example.com/",
+    ):
+        assert _url_is_safe(unsafe) is False, unsafe
+    # a normal public host is allowed (resolves to a routable address)
+    assert _url_is_safe("https://example.com") is True
+
+
+def test_brand_dna_fetch_refuses_internal_url_without_network():
+    # Even the real _fetch_site_text refuses an internal address (no request made).
+    from app.ingest.brand_dna import UnsafeFetchError, _fetch_site_text
+    import pytest as _pytest
+
+    with _pytest.raises(UnsafeFetchError):
+        _fetch_site_text("http://127.0.0.1:1/")

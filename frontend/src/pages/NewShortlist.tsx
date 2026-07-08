@@ -404,16 +404,17 @@ export function NewShortlist() {
               <Sparkles size={15} />
             </span>
             <h1 className="text-[22px] font-bold tracking-[-0.01em] text-ink">Brand DNA</h1>
-            {/* honest badge: a green "extracted" claim only when extraction actually
-                ran (live LLM path, or the demo's covered brand); anything else is a
-                labeled draft */}
+            {/* honest badge: the green "extracted" claim appears ONLY when live extraction
+                actually ran (real non-degraded backend response). The example brand
+                (glowlab) with no live run is a bundled SAMPLE — labeled as such, never as a
+                live "extracted" read; anything else is a labeled draft. */}
             {live ? (
               <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-verified-bg px-2 py-0.5 text-[11px] font-medium text-verified-fg">
                 <ShieldCheck size={12} /> extracted live from {url} · via {live.source}
               </span>
             ) : known ? (
-              <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-verified-bg px-2 py-0.5 text-[11px] font-medium text-verified-fg">
-                <ShieldCheck size={12} /> extracted from {url || "glowlab.co.th"}
+              <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-panel px-2 py-0.5 text-[11px] font-medium text-ink-500">
+                <Sparkles size={12} /> sample brief · Glow Lab example
               </span>
             ) : (
               <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-risk-med-bg px-2 py-0.5 text-[11px] font-medium text-risk-med-fg">
@@ -424,6 +425,17 @@ export function NewShortlist() {
           <p className="mt-1.5 text-[13px] text-ink-500">
             This is what Kollab understood about the brand. Edit anything, then find matching KOLs.
           </p>
+
+          {!live && known && (
+            <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-2.5">
+              <Sparkles size={16} className="mt-0.5 shrink-0 text-ink-400" />
+              <p className="text-[12px] leading-relaxed text-ink-700">
+                <span className="font-semibold text-ink">Sample brief.</span> These fields are the
+                bundled Glow Lab example — not a live read of a real site — shown so you can see and
+                edit the review flow. Analyze a real client URL{wired ? "" : " on the deployed build"} for live extraction.
+              </p>
+            </div>
+          )}
 
           {!live && !known && (
             <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-risk-med-border bg-risk-med-bg px-3.5 py-2.5">

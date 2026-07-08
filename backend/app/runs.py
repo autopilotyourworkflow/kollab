@@ -80,10 +80,17 @@ def run_job(run_id: str, brief_dict: dict | None, preset: str, expand: bool,
         _cancel_requested.discard(run_id)
 
 
-def request_cancel(run_id: str, apify_token: str | None = None) -> dict | None:
+def request_cancel(run_id: str, apify_token: str | None = None,
+                   apify_tokens: list[str] | None = None) -> dict | None:
     """Stop a run: flag it (the loop's cancel_check trips at the next phase boundary),
     mark it cancelled, and best-effort abort its in-flight Apify actor so the slow
-    search stops billing at once. Returns the updated run, or None if unknown."""
+    search stops billing at once. Returns the updated run, or None if unknown.
+
+    `apify_tokens` lets the caller pass EVERY candidate key (e.g. the whole env pool) so
+    the abort still fires in the recommended pool-only deployment, where no single legacy
+    `apify_token` is set but the run leased one of the numbered pool keys. Each pool key is
+    a separate Apify account, so we issue the abort on each — abort only affects RUNNING
+    actor-runs on that account, so this is safe and best-effort."""
     run = get_run(run_id)
     if run is None:
         return None
@@ -91,8 +98,13 @@ def request_cancel(run_id: str, apify_token: str | None = None) -> dict | None:
         return run  # already terminal — nothing to stop
     _cancel_requested.add(run_id)
     _update(run_id, status="cancelled")
-    if apify_token:
-        _abort_running_apify(apify_token)
+    # De-duplicate the candidate tokens, preserving order (request key first).
+    candidates: list[str] = []
+    for tok in ([apify_token] if apify_token else []) + list(apify_tokens or []):
+        if tok and tok not in candidates:
+            candidates.append(tok)
+    for tok in candidates:
+        _abort_running_apify(tok)
     return get_run(run_id)
 
 

@@ -84,20 +84,70 @@ def _normalize_url(url: str) -> str:
     return url
 
 
+def _host_is_public(host: str) -> bool:
+    """True only if EVERY resolved IP for `host` is a public, routable address. SSRF guard:
+    rejects loopback/private/link-local/reserved/multicast/unspecified targets — including
+    127.0.0.1, 10/172.16/192.168, and the cloud-metadata address 169.254.169.254 — so an
+    attacker-supplied `website` can't make the server fetch internal services."""
+    import ipaddress
+    import socket
+
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return False  # unresolvable -> refuse (fail closed)
+    if not infos:
+        return False
+    for info in infos:
+        ip = info[4][0]
+        # strip a possible IPv6 zone id (fe80::1%eth0)
+        ip = ip.split("%", 1)[0]
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+            return False
+    return True
+
+
+def _url_is_safe(url: str) -> bool:
+    """http(s) scheme + a public host. Used before any server-side fetch."""
+    p = urlparse(_normalize_url(url))
+    return p.scheme in ("http", "https") and _host_is_public(p.hostname or "")
+
+
+class UnsafeFetchError(RuntimeError):
+    """The requested URL resolves to a non-public address (SSRF guard tripped)."""
+
+
 def _fetch_site_text(url: str) -> str:
     import httpx  # lazy: live-path dependency only
 
-    r = httpx.get(
-        _normalize_url(url),
+    # Follow redirects MANUALLY so every hop is SSRF-checked: a public URL that 30x-redirects
+    # to an internal address (127.0.0.1 / 169.254.169.254 / VPC) must not slip past the guard.
+    current = _normalize_url(url)
+    with httpx.Client(
         timeout=FETCH_TIMEOUT_S,
-        follow_redirects=True,
+        follow_redirects=False,
         headers={"User-Agent": "Kollab/0.1 brand-dna preview (contact via brief owner)"},
-    )
-    r.raise_for_status()
-    parser = _TextExtractor()
-    parser.feed(r.text[:500_000])
-    text = re.sub(r"\s+", " ", " ".join(parser.chunks))
-    return text[:MAX_SITE_CHARS]
+    ) as client:
+        for _hop in range(5):
+            if not _url_is_safe(current):
+                raise UnsafeFetchError(f"refusing to fetch a non-public address: {current!r}")
+            r = client.get(current)
+            if r.is_redirect and r.headers.get("location"):
+                current = str(r.next_request.url) if r.next_request else r.headers["location"]
+                continue
+            r.raise_for_status()
+            parser = _TextExtractor()
+            parser.feed(r.text[:500_000])
+            text = re.sub(r"\s+", " ", " ".join(parser.chunks))
+            return text[:MAX_SITE_CHARS]
+    raise UnsafeFetchError("too many redirects")
 
 
 READER_TIMEOUT_S = 30.0
@@ -112,6 +162,10 @@ def _fetch_via_reader(url: str) -> str:
     import os
 
     import httpx  # lazy: live-path dependency only
+
+    # Same SSRF guard as the direct path: never hand an internal address to the reader proxy.
+    if not _url_is_safe(url):
+        raise UnsafeFetchError(f"refusing to read a non-public address: {url!r}")
 
     headers = {"X-Return-Format": "text"}
     key = os.getenv("JINA_API_KEY")

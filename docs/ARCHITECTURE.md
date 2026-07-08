@@ -76,8 +76,9 @@ lists each signal and its grounding.
   surprise bill. The client is injectable, so the whole loop is tested against a fake;
   the first run against the real actors is a calibration run. Sourcing is region-targeted via
   the scraper's `proxyCountryCode` (`KOLLAB_REGION`, default `TH`) so search returns Thai
-  creators — verified live (Thai queries + TH proxy return Thai skincare creators where
-  English queries returned US ones). Commenter-profile second-pass enrichment is deliberately
+  creators — validated in the pre-flight data spike (2026-07-02: Thai queries + TH proxy
+  returned Thai skincare creators where English queries returned US ones), to be re-confirmed
+  on the first live calibration run. Commenter-profile second-pass enrichment is deliberately
   not pulled (cost) — without it the thin-commenter detector withholds rather than guesses.
   Missing preconditions (no token, no `apify-client`) surface as an honest `503` with the
   reason. Clearly labeled prototyping/public-data only.
@@ -168,7 +169,7 @@ localhost.
 
 ## Testing
 
-254 tests (`backend/tests/`) on synthetic data + fake clients: run-depth plan math +
+266 tests (`backend/tests/`) on synthetic data + fake clients: run-depth plan math +
 frontend-parity enforcement, every detector (pod / burst /
 templated / thin / ER-outlier / view-to-follower / boosted / dormancy) in both firing and
 silent cases, the withhold paths (min-cohort AND min-video-sample), vetting dedup + ordering
