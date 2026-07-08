@@ -21,6 +21,7 @@ export interface AuthResult {
 export class AuthError extends Error {}
 
 const TOKEN_KEY = "kollab-auth"
+const USER_KEY = "kollab-user"
 
 export function getAuthToken(): string | null {
   try {
@@ -41,22 +42,66 @@ export function setAuthToken(token: string): void {
 export function clearAuthToken(): void {
   try {
     localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(USER_KEY)
   } catch {
     /* nothing to clear */
   }
 }
 
-/** Hydrate the current user from the stored token, or null (no backend / no or bad token). */
-export async function apiMe(): Promise<AuthUser | null> {
-  const base = apiBase()
-  const token = getAuthToken()
-  if (!base || !token) return null
+/** The last-known user, cached alongside the token, so a returning visitor renders the app
+ *  INSTANTLY (optimistically) while the token is validated in the background — instead of
+ *  staring at a spinner while the (possibly asleep) backend answers /api/auth/me. */
+export function getCachedUser(): AuthUser | null {
   try {
-    const res = await fetch(`${base}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-    if (!res.ok) return null
-    return (await res.json()) as AuthUser
+    const raw = localStorage.getItem(USER_KEY)
+    if (!raw) return null
+    const u = JSON.parse(raw) as AuthUser
+    return typeof u?.id === "string" ? u : null
   } catch {
     return null
+  }
+}
+
+export function setCachedUser(user: AuthUser): void {
+  try {
+    localStorage.setItem(USER_KEY, JSON.stringify(user))
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Outcome of validating the stored token. `unauthorized` (a real 401) means the token is
+ *  dead — sign out. `unreachable` (network / 5xx / cold-start blip) means we simply couldn't
+ *  check — KEEP the session (never log a valid user out just because the server was waking). */
+export type MeResult =
+  | { status: "ok"; user: AuthUser }
+  | { status: "unauthorized" }
+  | { status: "unreachable" }
+
+/** Validate the stored token against the backend. */
+export async function apiMe(): Promise<MeResult> {
+  const base = apiBase()
+  const token = getAuthToken()
+  if (!base || !token) return { status: "unauthorized" }
+  try {
+    const res = await fetch(`${base}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+    if (res.status === 401) return { status: "unauthorized" }
+    if (!res.ok) return { status: "unreachable" } // 5xx / gateway blip while waking — keep session
+    return { status: "ok", user: (await res.json()) as AuthUser }
+  } catch {
+    return { status: "unreachable" } // network / timeout — keep session, don't log out
+  }
+}
+
+/** Fire-and-forget backend wake-up so the instance (which sleeps on the free tier) starts
+ *  cold-starting as early as possible, overlapping with the app's own first data fetches. */
+export function prewarmBackend(): void {
+  const base = apiBase()
+  if (!base) return
+  try {
+    void fetch(`${base}/health`, { method: "GET", mode: "cors", keepalive: true }).catch(() => {})
+  } catch {
+    /* ignore */
   }
 }
 

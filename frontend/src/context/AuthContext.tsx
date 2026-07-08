@@ -8,7 +8,10 @@ import {
   apiSignup,
   clearAuthToken,
   getAuthToken,
+  getCachedUser,
+  prewarmBackend,
   setAuthToken,
+  setCachedUser,
   type AuthResult,
   type AuthUser,
 } from "../lib/auth"
@@ -41,20 +44,40 @@ const LOCAL_USER: AuthUser = { id: "local", email: null, isGuest: false }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const mode: Mode = apiBase() ? "api" : "local"
-  const [user, setUser] = useState<AuthUser | null>(mode === "local" ? LOCAL_USER : null)
-  const [loading, setLoading] = useState(mode === "api")
+  // Optimistic hydration: a returning visitor with a cached user renders the app IMMEDIATELY
+  // (no spinner, no wait on the possibly-asleep backend); the token is validated in the
+  // background below. Only when there's a token but no cached user do we block on the check.
+  const initialUser = mode === "local" ? LOCAL_USER : getAuthToken() ? getCachedUser() : null
+  const [user, setUser] = useState<AuthUser | null>(initialUser)
+  const [loading, setLoading] = useState(mode === "api" && !!getAuthToken() && !getCachedUser())
 
-  // Reuse-before-mint: a returning visitor with a valid token skips the gate entirely.
+  // Wake the sleeping free-tier backend as early as possible, so its cold start overlaps
+  // with the app's first render/data fetches instead of stacking on top of them.
+  useEffect(() => {
+    if (mode === "api") prewarmBackend()
+  }, [mode])
+
+  // Validate the stored token. A cached user is already shown, so this runs in the
+  // background: a real 401 signs out; a network/cold-start failure keeps the session
+  // (never log a valid user out because the server was waking).
   useEffect(() => {
     if (mode !== "api") return
+    if (!getAuthToken()) {
+      setLoading(false)
+      return
+    }
     let alive = true
     ;(async () => {
-      if (getAuthToken()) {
-        const u = await apiMe()
-        if (!alive) return
-        if (u) setUser(u)
-        else clearAuthToken()
+      const r = await apiMe()
+      if (!alive) return
+      if (r.status === "ok") {
+        setUser(r.user)
+        setCachedUser(r.user)
+      } else if (r.status === "unauthorized") {
+        clearAuthToken()
+        setUser(null)
       }
+      // "unreachable": keep whatever we have (the cached user stays signed in)
       if (alive) setLoading(false)
     })()
     return () => {
@@ -76,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const adopt = (r: AuthResult) => {
     setAuthToken(r.token)
+    setCachedUser(r.user) // so the next load renders instantly from cache
     setUser(r.user)
   }
 

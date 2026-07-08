@@ -22,9 +22,18 @@ const EASE_OUT_QUART = [0.25, 1, 0.5, 1] as const
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading, mode } = useAuth()
   if (mode === "api" && loading) {
+    // Reached only when there's a token but no cached user yet (e.g. the first load right
+    // after signing in on another device). The free-tier backend may be cold-starting, so
+    // say so rather than showing a bare spinner that reads as "broken".
     return (
-      <div className="grid min-h-svh place-items-center bg-surface">
-        <Loader2 size={26} className="animate-spin text-brand" />
+      <div className="grid min-h-svh place-items-center bg-surface px-6">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <Loader2 size={26} className="animate-spin text-brand" />
+          <p className="text-[13px] text-ink-500">Waking up your workspace…</p>
+          <p className="max-w-xs text-[11px] text-ink-400">
+            The demo server sleeps when idle — the first load can take a moment.
+          </p>
+        </div>
       </div>
     )
   }

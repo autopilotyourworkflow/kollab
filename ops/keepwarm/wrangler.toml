@@ -1,0 +1,10 @@
+name = "kollab-keepwarm"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+# autopilotyourworkflow account (same as the Pages project + repo)
+account_id = "a2d57c1e05c835fb5f259ca1b2725b59"
+
+# Ping the backend every 10 minutes. Render's free tier sleeps after ~15 min idle, so this
+# keeps it awake (and cold-start-free) for reviewers. Remove/relax to let it sleep again.
+[triggers]
+crons = ["*/10 * * * *"]

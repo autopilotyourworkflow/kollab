@@ -158,14 +158,7 @@ export function Dashboard() {
   }
 
   const totalFlagged = entries.reduce((n, e) => n + counts(e.kols).flagged, 0)
-
-  if (loading && entries.length === 0) {
-    return (
-      <div className="grid min-h-[60svh] place-items-center">
-        <Loader2 size={24} className="animate-spin text-brand" />
-      </div>
-    )
-  }
+  const firstLoad = loading && entries.length === 0
 
   return (
     <div className="px-[var(--d-page-px)] py-[var(--d-page-py)]">
@@ -173,9 +166,15 @@ export function Dashboard() {
         <div>
           <h1 className="text-[26px] font-bold tracking-[-0.02em] text-ink">Shortlists</h1>
           <p className="mt-1 text-[13px] text-ink-500">
-            {entries.length} {entries.length === 1 ? "campaign" : "campaigns"}
-            {totalFlagged > 0 && <> · {totalFlagged} creators flagged across all</>} · open one to review, or start a new
-            shortlist.
+            {firstLoad ? (
+              "Loading your campaigns…"
+            ) : (
+              <>
+                {entries.length} {entries.length === 1 ? "campaign" : "campaigns"}
+                {totalFlagged > 0 && <> · {totalFlagged} creators flagged across all</>} · open one to review, or start a
+                new shortlist.
+              </>
+            )}
           </p>
         </div>
         <Button onClick={() => navigate("/app/new")} leadingIcon={<Plus size={16} />}>
@@ -183,7 +182,13 @@ export function Dashboard() {
         </Button>
       </div>
 
-      {entries.length === 0 ? (
+      {firstLoad ? (
+        // The header + action render immediately; only the list area waits on the backend
+        // (which may be cold-starting) — the page is never a blank full-screen spinner.
+        <div className="grid min-h-[40svh] place-items-center rounded-2xl border border-dashed border-border bg-white/50">
+          <Loader2 size={24} className="animate-spin text-brand" />
+        </div>
+      ) : entries.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border-strong bg-white px-6 py-16 text-center">
           <span className="grid h-12 w-12 place-items-center rounded-full bg-brand-50 text-brand">
             <Users size={22} />
