@@ -130,3 +130,57 @@ def test_brand_dna_fetch_refuses_internal_url_without_network():
 
     with _pytest.raises(UnsafeFetchError):
         _fetch_site_text("http://127.0.0.1:1/")
+
+
+def test_apify_accounts_endpoint_auth_masking_and_select(tmp_path, monkeypatch):
+    # The pool view + manual switch endpoints: auth-gated, masked (never the token), and the
+    # selection flips which account is 'active'. Balance fetch is stubbed (no network).
+    from app.db import init_db, reset_db_cache
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'acc.db').as_posix()}")
+    monkeypatch.setenv("KOLLAB_AUTH_SECRET", "test-secret")
+    monkeypatch.delenv("APIFY_TOKEN", raising=False)
+    monkeypatch.setenv("APIFY_TOKEN_1", "apify_api_secretone1111")
+    monkeypatch.setenv("APIFY_TOKEN_2", "apify_api_secrettwo2222")
+    reset_db_cache()
+    init_db()
+    from app import keypool
+    keypool._drained.clear()
+    keypool._preferred = None
+    monkeypatch.setattr(keypool, "fetch_apify_credit",
+                        lambda t: {"remainingUsd": 3.0, "limitUsd": 5.0, "usedUsd": 2.0,
+                                   "cycleEndAt": None, "checked": True, "note": ""})
+    import app.main as main_mod
+    main_mod._rl_buckets.clear()
+    from fastapi.testclient import TestClient
+    c = TestClient(main_mod.app)
+    try:
+        # unauthenticated -> 401 (not public)
+        assert c.get("/api/apify-accounts").status_code == 401
+        tok = c.post("/api/auth/signup", json={"email": "acc@x.com", "password": "supersecret"}).json()["token"]
+        h = {"Authorization": f"Bearer {tok}"}
+
+        body = c.get("/api/apify-accounts", headers=h).json()
+        assert body["poolEnabled"] is True and len(body["accounts"]) == 2
+        assert body["preferred"] is None
+        # never leaks a token
+        assert all("token" not in a for a in body["accounts"])
+        assert "secretone" not in str(body) and "secrettwo" not in str(body)
+        # first is active by default; balances surfaced
+        assert body["accounts"][0]["active"] is True
+        assert body["accounts"][0]["remainingUsd"] == 3.0
+
+        # select the 2nd -> it becomes preferred + active
+        fp2 = body["accounts"][1]["fingerprint"]
+        sel = c.post("/api/apify-accounts/select", headers=h, json={"keyId": fp2}).json()
+        assert sel["preferred"] == fp2
+        assert next(a for a in sel["accounts"] if a["fingerprint"] == fp2)["active"] is True
+
+        # unknown id -> 400
+        assert c.post("/api/apify-accounts/select", headers=h, json={"keyId": "nope"}).status_code == 400
+        # auto -> clears the preference
+        assert c.post("/api/apify-accounts/select", headers=h, json={"keyId": None}).json()["preferred"] is None
+    finally:
+        keypool._drained.clear()
+        keypool._preferred = None
+        reset_db_cache()

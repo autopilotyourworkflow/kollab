@@ -21,8 +21,10 @@ def pool(monkeypatch):
         if name == "APIFY_TOKEN" or re.fullmatch(r"APIFY_TOKEN_\d+", name):
             monkeypatch.delenv(name, raising=False)
     keypool._drained.clear()
+    keypool._preferred = None
     yield keypool
     keypool._drained.clear()
+    keypool._preferred = None
 
 
 # ── token discovery + ordering ──────────────────────────────────────────────
@@ -214,3 +216,50 @@ def test_no_pool_keeps_legacy_behavior():
     adapter = ApifyAdapter(token="tok1", client=fake)   # no pool
     with pytest.raises(_FakeQuotaError):
         adapter._run_actor(fake, TIKTOK_SCRAPER_ACTOR, {"searchQueries": ["x"]})
+
+
+# ── manual account selection + auto-switch off a low account ─────────────────
+def test_set_preferred_makes_it_the_active_account(pool, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN_1", "tok-1")
+    monkeypatch.setenv("APIFY_TOKEN_2", "tok-2")
+    monkeypatch.setenv("APIFY_TOKEN_3", "tok-3")
+    fps = {a["label"]: a["fingerprint"] for a in pool.accounts(with_balance=False)}
+
+    assert pool.acquire().label == "APIFY_TOKEN_1"        # default = first in order
+    assert pool.set_preferred(fps["APIFY_TOKEN_2"]) is True
+    assert pool.get_preferred() == fps["APIFY_TOKEN_2"]
+    assert pool.acquire().label == "APIFY_TOKEN_2"        # now runs start on the chosen one
+
+
+def test_preferred_auto_switches_when_low_and_returns_on_recovery(pool, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN_1", "tok-1")
+    monkeypatch.setenv("APIFY_TOKEN_2", "tok-2")
+    fps = {a["label"]: a["fingerprint"] for a in pool.accounts(with_balance=False)}
+    pool.set_preferred(fps["APIFY_TOKEN_2"])
+    assert pool.acquire().label == "APIFY_TOKEN_2"
+
+    pool.mark(fps["APIFY_TOKEN_2"], "exhausted", "low balance")   # the low-credit sweep drains it
+    assert pool.acquire().label == "APIFY_TOKEN_1"                # AUTO-SWITCH to the next healthy
+
+    pool.mark(fps["APIFY_TOKEN_2"], "active")                     # monthly refill recovers it
+    assert pool.acquire().label == "APIFY_TOKEN_2"               # back to the preferred account
+
+
+def test_set_preferred_rejects_unknown_and_clears_on_auto(pool, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN_1", "tok-1")
+    assert pool.set_preferred("not-a-real-fingerprint") is False
+    assert pool.get_preferred() is None
+    fp = pool.accounts(with_balance=False)[0]["fingerprint"]
+    pool.set_preferred(fp)
+    assert pool.set_preferred(None) is True                       # 'auto'
+    assert pool.get_preferred() is None
+
+
+def test_accounts_never_leak_the_token(pool, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN_1", "apify_api_secretvalue1234")
+    rows = pool.accounts(with_balance=False)
+    assert len(rows) == 1
+    row = rows[0]
+    assert "token" not in row
+    assert row["hint"] == "apify_api_…1234"                       # masked, last 4 only
+    assert "secretvalue" not in str(row)                          # the raw token never appears

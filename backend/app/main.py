@@ -255,6 +255,42 @@ def credit(
         }
 
 
+# ── Apify accounts (the operator key pool) — view + manual switch ────────────
+@app.get("/api/apify-accounts")
+def apify_accounts_endpoint(authorization: str | None = Header(default=None)) -> dict:
+    """List the operator's Apify pool accounts for the Settings UI: each account's env-var
+    name, a MASKED hint (never the raw token), health, live balance, and which one is
+    preferred/active. Requires a signed-in user. Runs auto-switch off a low account to the
+    next healthy one regardless of the preference (the preference only sets the start)."""
+    current_user(authorization)
+    return {
+        "poolEnabled": keypool.available(),
+        "preferred": keypool.get_preferred(),
+        "accounts": keypool.accounts(with_balance=True),
+    }
+
+
+@app.post("/api/apify-accounts/select")
+def select_apify_account_endpoint(
+    payload: dict = Body(default={}),
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Pick which pool account runs START on (shared operator setting). Body: {"keyId":
+    "<fingerprint>"} to select, or {"keyId": null/""} for auto (env order). A run still
+    auto-switches to the next healthy account if the selected one runs low."""
+    current_user(authorization)
+    key_id = (payload.get("keyId") or "").strip() or None
+    if not keypool.set_preferred(key_id):
+        raise HTTPException(status_code=400, detail="Unknown Apify account.")
+    # Skip the per-key balance fetch on write so the switch is instant; the UI re-reads
+    # balances via GET when it wants them.
+    return {
+        "poolEnabled": keypool.available(),
+        "preferred": keypool.get_preferred(),
+        "accounts": keypool.accounts(with_balance=False),
+    }
+
+
 @app.get("/api/shortlist", response_model=ShortlistResponse)
 def get_shortlist() -> ShortlistResponse:
     """The default demo shortlist (Glow Lab) on curated fixtures — always seed-backed,

@@ -55,6 +55,38 @@ class Lease:
 # per process; reset on restart, re-derived by the refresher + reactive path).
 _drained: dict[str, str] = {}
 
+# Operator's manually-selected account that runs should START on (fingerprint), or None
+# for pure env order. Shared + in-memory like _drained (single instance). A run still
+# AUTO-SWITCHES off it to the next healthy account when it runs low/exhausts — the
+# preference only sets the starting point, it never pins a dead key.
+_preferred: str | None = None
+
+
+def _configured_fingerprints() -> set[str]:
+    return {_fp(tok) for _label, tok in env_tokens()}
+
+
+def set_preferred(key_id: str | None) -> bool:
+    """Choose which pool account runs start on, by fingerprint. Falsy -> 'auto' (env order).
+    Returns True when applied; False if key_id isn't a currently-configured account."""
+    global _preferred
+    if not key_id:
+        _preferred = None
+        return True
+    if key_id in _configured_fingerprints():
+        _preferred = key_id
+        return True
+    return False
+
+
+def get_preferred() -> str | None:
+    """The selected starting account, or None (auto). Self-heals: a preference for a key
+    that's no longer configured (env changed) silently reverts to auto."""
+    global _preferred
+    if _preferred is not None and _preferred not in _configured_fingerprints():
+        _preferred = None
+    return _preferred
+
 
 def env_tokens() -> list[tuple[str, str]]:
     """Ordered [(label, token)]: APIFY_TOKEN first (legacy), then APIFY_TOKEN_1..N in
@@ -87,16 +119,61 @@ def available() -> bool:
 
 
 def acquire(exclude_ids: set[str] | None = None) -> Lease | None:
-    """The first env token that isn't excluded and isn't currently drained. Order is
-    APIFY_TOKEN then _1.._N, so Kollab burns them predictably in sequence. `exclude_ids`
-    are keys the current run already tried, so a mid-run swap never re-hands a dead one."""
+    """The account a run should use now: the operator's preferred account when it's set,
+    healthy, and not already excluded — otherwise the first healthy env token in order
+    (APIFY_TOKEN then _1.._N). `exclude_ids` are keys the current run already tried, so a
+    mid-run swap never re-hands a dead one; a preferred key that's drained/excluded simply
+    falls through to the next healthy account (this is the auto-switch)."""
     exclude = set(exclude_ids or ())
-    for label, tok in env_tokens():
+    tokens = env_tokens()
+
+    pref = get_preferred()
+    if pref and pref not in exclude and pref not in _drained:
+        for label, tok in tokens:
+            if _fp(tok) == pref:
+                return Lease(key_id=pref, label=label, token=tok)
+
+    for label, tok in tokens:
         fp = _fp(tok)
         if fp in exclude or fp in _drained:
             continue
         return Lease(key_id=fp, label=label, token=tok)
     return None
+
+
+def accounts(with_balance: bool = True) -> list[dict]:
+    """Per-account view for the Settings UI. Each row identifies an account by its env-var
+    name + a MASKED hint (never the token) + fingerprint, its health, whether it's the
+    preferred/effective-active account, and — when `with_balance` — its live Apify balance
+    (a free read of /users/me/limits, spends nothing). The raw token is NEVER returned."""
+    toks = env_tokens()
+    pref = get_preferred()
+    lease = acquire()  # the account a run would actually start on right now
+    active_fp = lease.key_id if lease else None
+    rows: list[dict] = []
+    for label, tok in toks:
+        fp = _fp(tok)
+        row = {
+            "label": label,           # e.g. "APIFY_TOKEN_1" — the Render env var
+            "hint": _mask(tok),       # e.g. "apify_api_…gr3n" — safe to show
+            "fingerprint": fp,        # one-way id used to select this account
+            "healthy": fp not in _drained,
+            "note": _drained.get(fp),  # why it's drained (low balance / invalid), if so
+            "preferred": fp == pref,   # the operator's chosen starting account
+            "active": fp == active_fp,  # the account a run would use right now
+        }
+        if with_balance:
+            bal = fetch_apify_credit(tok)
+            row.update({
+                "checked": bal.get("checked"),
+                "remainingUsd": bal.get("remainingUsd"),
+                "limitUsd": bal.get("limitUsd"),
+                "usedUsd": bal.get("usedUsd"),
+                "cycleEndAt": bal.get("cycleEndAt"),
+                "balanceNote": bal.get("note"),
+            })
+        rows.append(row)
+    return rows
 
 
 def mark(key_id: str, status: str, error: str | None = None) -> None:

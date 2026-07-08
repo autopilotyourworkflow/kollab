@@ -15,11 +15,225 @@ import {
   Loader2,
   Lock,
 } from "lucide-react"
+import { Server, Zap } from "lucide-react"
 import { Button } from "../components/ui/Button"
 import { GraphCard } from "../components/app/GraphCard"
 import { loadKeys, saveKeys, clearKeys, type ByoKeys } from "../lib/credentials"
-import { apiBase, fetchCredit, type CreditInfo } from "../lib/credit"
+import {
+  apiBase,
+  fetchCredit,
+  getApifyAccounts,
+  selectApifyAccount,
+  type CreditInfo,
+  type ApifyAccount,
+  type ApifyAccountsPayload,
+} from "../lib/credit"
 import { cn } from "../lib/cn"
+
+/** One row in the Apify-accounts pool: env label + masked hint + live balance + status,
+ *  acting as a radio to make it the account runs start on. */
+function AccountRow({
+  account,
+  selectedFp,
+  onSelect,
+  busy,
+}: {
+  account: ApifyAccount
+  selectedFp: string | null
+  onSelect: (fp: string) => void
+  busy: boolean
+}) {
+  const a = account
+  const chosen = selectedFp === a.fingerprint
+  const hasNums = typeof a.remainingUsd === "number" && typeof a.limitUsd === "number" && (a.limitUsd as number) > 0
+  const frac = hasNums ? Math.max(0, Math.min(1, (a.remainingUsd as number) / (a.limitUsd as number))) : 0
+  const low = hasNums && (a.remainingUsd as number) < (a.limitUsd as number) * 0.2
+  const empty = hasNums && (a.remainingUsd as number) <= 0
+  const barColor = empty || !a.healthy ? "bg-risk-high" : low ? "bg-risk-med-fg" : "bg-verified"
+
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={chosen}
+      disabled={busy}
+      onClick={() => onSelect(a.fingerprint)}
+      className={cn(
+        "w-full rounded-xl border p-3.5 text-left transition-colors duration-200 disabled:opacity-60",
+        chosen ? "border-brand-300 bg-brand-50/50 ring-1 ring-brand-300" : "border-border bg-white hover:border-brand-300",
+      )}
+    >
+      <div className="flex items-center gap-2.5">
+        {/* radio dot */}
+        <span
+          className={cn(
+            "grid h-4 w-4 shrink-0 place-items-center rounded-full border",
+            chosen ? "border-brand bg-brand" : "border-border-strong bg-white",
+          )}
+        >
+          {chosen && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+        </span>
+        <span className="font-mono text-[12px] font-semibold text-ink">{a.hint}</span>
+        <span className="rounded-full bg-panel px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-ink-500">
+          {a.label}
+        </span>
+        <span className="ml-auto flex items-center gap-1.5">
+          {a.active && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-verified-bg px-2 py-0.5 text-[10px] font-semibold text-verified-fg">
+              <Zap size={10} /> Active
+            </span>
+          )}
+          {!a.healthy && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-risk-high-bg px-2 py-0.5 text-[10px] font-semibold text-risk-high-fg">
+              <AlertTriangle size={10} /> {a.note || "unavailable"}
+            </span>
+          )}
+          {a.healthy && low && !empty && (
+            <span className="rounded-full bg-risk-med-bg px-2 py-0.5 text-[10px] font-semibold text-risk-med-fg">Low</span>
+          )}
+        </span>
+      </div>
+
+      <div className="mt-2.5 pl-6.5">
+        {a.checked && hasNums ? (
+          <>
+            <div className="flex items-baseline justify-between text-[12px]">
+              <span className="text-ink-500">Apify credit</span>
+              <span className="tnum font-semibold text-ink">
+                ${(a.remainingUsd as number).toFixed(2)}
+                <span className="font-normal text-ink-500"> of ${(a.limitUsd as number).toFixed(2)}</span>
+              </span>
+            </div>
+            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-panel">
+              <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${frac * 100}%` }} />
+            </div>
+            {a.cycleEndAt && (
+              <div className="mt-1 text-[10.5px] text-ink-400">resets {new Date(a.cycleEndAt).toLocaleDateString()}</div>
+            )}
+          </>
+        ) : (
+          <div className="text-[11px] text-ink-400">
+            {a.balanceNote || "balance unreported"}
+          </div>
+        )}
+      </div>
+    </button>
+  )
+}
+
+const AUTO = "__auto__"
+
+/** The operator's Apify account pool — see every account (masked), their live balances, and
+ *  manually pick which one runs start on. Runs auto-switch to the next healthy account when
+ *  the chosen one runs low. Shown only when a backend + a pool are configured. */
+function ApifyAccountsPanel() {
+  const [data, setData] = useState<ApifyAccountsPayload | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState<string | null>(null) // fingerprint being selected
+
+  const load = () => {
+    if (!apiBase()) {
+      setLoading(false)
+      return
+    }
+    // Only the very first load blanks the panel to a spinner (loading starts true). A
+    // re-fetch after a switch keeps the list visible and updates it in place — no flash.
+    getApifyAccounts()
+      .then((d) => {
+        if (d) setData(d)
+      })
+      .finally(() => setLoading(false))
+  }
+  useEffect(load, [])
+
+  const selectedFp = data?.preferred ?? AUTO
+
+  const choose = (fp: string) => {
+    if (busy) return
+    setBusy(fp)
+    // optimistic: mark the chosen one preferred immediately
+    setData((d) =>
+      d ? { ...d, preferred: fp === AUTO ? null : fp, accounts: d.accounts.map((a) => ({ ...a, preferred: a.fingerprint === fp })) } : d,
+    )
+    selectApifyAccount(fp === AUTO ? null : fp)
+      .then(() => load()) // re-read balances + the recomputed "active" account
+      .finally(() => setBusy(null))
+  }
+
+  if (!apiBase()) {
+    return (
+      <div className="flex items-start gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-3 text-[12px] leading-relaxed text-ink-700">
+        <Lock size={15} className="mt-0.5 shrink-0 text-ink-400" />
+        <span>
+          <span className="font-semibold text-ink">Offline preview.</span> Connect to a Kollab backend to view and switch
+          between the operator's Apify accounts.
+        </span>
+      </div>
+    )
+  }
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3.5 py-3 text-[12px] text-ink-500">
+        <Loader2 size={14} className="animate-spin" /> Loading accounts…
+      </div>
+    )
+  }
+  if (!data || !data.poolEnabled || data.accounts.length === 0) {
+    return (
+      <p className="text-[12px] leading-relaxed text-ink-500">
+        No shared Apify accounts are configured on the server. The operator sets{" "}
+        <code className="rounded bg-panel px-1 py-px font-mono text-[11px]">APIFY_TOKEN_1</code>,{" "}
+        <code className="rounded bg-panel px-1 py-px font-mono text-[11px]">APIFY_TOKEN_2</code>, … in the deploy
+        environment — or add your own key above to run on your account.
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[12px] leading-relaxed text-ink-500">
+        Runs start on the selected account and <span className="font-medium text-ink-700">automatically switch</span> to
+        the next healthy one if it runs low or hits its monthly wall. Tokens live in the server environment — for safety
+        each account shows a masked hint, never the full token.
+      </p>
+
+      <div role="radiogroup" aria-label="Apify account for runs" className="space-y-2">
+        {/* Auto option */}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={selectedFp === AUTO}
+          disabled={!!busy}
+          onClick={() => choose(AUTO)}
+          className={cn(
+            "flex w-full items-center gap-2.5 rounded-xl border p-3 text-left transition-colors duration-200 disabled:opacity-60",
+            selectedFp === AUTO ? "border-brand-300 bg-brand-50/50 ring-1 ring-brand-300" : "border-border bg-white hover:border-brand-300",
+          )}
+        >
+          <span
+            className={cn(
+              "grid h-4 w-4 shrink-0 place-items-center rounded-full border",
+              selectedFp === AUTO ? "border-brand bg-brand" : "border-border-strong bg-white",
+            )}
+          >
+            {selectedFp === AUTO && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+          </span>
+          <Server size={14} className="text-ink-400" />
+          <span className="text-[13px] font-semibold text-ink">Auto</span>
+          <span className="text-[12px] text-ink-500">— use accounts in order, skipping any that are low</span>
+        </button>
+
+        {data.accounts.map((a) => (
+          <AccountRow key={a.fingerprint} account={a} selectedFp={selectedFp} onSelect={choose} busy={!!busy} />
+        ))}
+      </div>
+
+      <button onClick={load} className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-500 hover:text-brand">
+        <RefreshCw size={12} /> Refresh balances
+      </button>
+    </div>
+  )
+}
 
 /** One masked API-key input with a show/hide toggle. */
 function KeyField({
@@ -296,6 +510,15 @@ export function Settings() {
             </Button>
           )}
         </div>
+      </div>
+
+      {/* ── Apify accounts (operator pool): view + manual switch + auto-switch ── */}
+      <div className="mt-5 rounded-2xl border border-border bg-white p-6 shadow-sm">
+        <div className="mb-3 flex items-center gap-2">
+          <Server size={16} className="text-ink-400" />
+          <h2 className="text-[16px] font-semibold text-ink">Apify accounts</h2>
+        </div>
+        <ApifyAccountsPanel />
       </div>
 
       {/* ── Fraud-recall moat: the persistent commenter graph ── */}
