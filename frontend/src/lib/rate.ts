@@ -6,7 +6,7 @@
  * (app/pricing/rate.py) — so the number on screen is always their assumption applied to
  * this creator's measured reach, never a market rate. */
 
-import type { RateBand, RateBasis } from "./types"
+import type { Kol, RateBand, RateBasis } from "./types"
 
 /** Mirrors backend DEFAULT_CPM_THB (config.py) — a neutral placeholder, not a benchmark. */
 export const CPM_DEFAULT = 150
@@ -60,4 +60,25 @@ export function computeBand(basis: RateBasis, cpm: number): RateBand {
   const disc = Math.max(0, Math.min(1, basis.authenticity / 100))
   const point = ((basis.medianOrganicViews * disc) / 1000) * cpm
   return { low: Math.round(point * (1 - SPREAD)), high: Math.round(point * (1 + SPREAD)) }
+}
+
+/** Derive a RateBasis from a KOL's own displayed fields when the backend didn't ship one
+ *  (e.g. creators sourced by an older run, before thin samples were priced). It reuses the
+ *  EXACT inputs the backend would: `medianViews` IS median_organic_views, and the
+ *  authenticity factor score IS the vet authenticity — so the derived band matches the
+ *  backend's to the baht. `videosSampled` is unknown here (0), so the UI labels it "derived
+ *  from median reach". Returns null when there's no reach or authenticity to price. */
+export function deriveBasis(kol: Kol): RateBasis | null {
+  const median = kol.medianViews
+  if (!median || median <= 0) return null
+  const auth = kol.factors?.find((f) => f.key === "authenticity")?.score
+  if (typeof auth !== "number") return null
+  return {
+    medianOrganicViews: median,
+    cpmThb: CPM_DEFAULT,
+    authenticity: auth,
+    videosSampled: 0, // unknown for a derived basis — the UI shows a "derived" caveat, not a count
+    band: { low: 0, high: 0 }, // recomputed live by computeBand() with the current CPM
+    method: "Derived from the creator's median reach × your CPM × authenticity — not a market rate card.",
+  }
 }

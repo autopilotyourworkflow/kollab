@@ -1,7 +1,7 @@
 import { useMemo, useSyncExternalStore } from "react"
 import { Coins, Info, RotateCcw } from "lucide-react"
 import type { Kol } from "../../lib/types"
-import { CPM_DEFAULT, computeBand, getCpm, setCpmShared, subscribeCpm } from "../../lib/rate"
+import { CPM_DEFAULT, computeBand, deriveBasis, getCpm, setCpmShared, subscribeCpm } from "../../lib/rate"
 import { compact } from "../../lib/format"
 import { cn } from "../../lib/cn"
 
@@ -15,7 +15,12 @@ const THIN_SAMPLE = 5
  *  Never a market rate card: drag the CPM and the band rescales linearly. */
 export function RateEstimate({ kol }: { kol: Kol }) {
   const cpm = useSyncExternalStore(subscribeCpm, getCpm)
-  const basis = kol.rateBasis
+  // Prefer the backend's basis; otherwise derive one from the KOL's own displayed reach +
+  // authenticity, so Economics shows even for creators sourced before thin samples were
+  // priced (same inputs -> same band). `derived` drives an honest "derived from median
+  // reach" caveat instead of a sampled-video count.
+  const derived = !kol.rateBasis
+  const basis = useMemo(() => kol.rateBasis ?? deriveBasis(kol), [kol])
 
   const band = useMemo(() => (basis ? computeBand(basis, cpm) : null), [basis, cpm])
 
@@ -78,17 +83,28 @@ export function RateEstimate({ kol }: { kol: Kol }) {
           <span>authenticity</span>
         </div>
 
-        {/* sample size — and an honest 'thin sample' caveat when the live pull surfaced
-            only a few of the creator's videos (common on Scan/Standard) */}
-        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-ink-500">
-          <span>
-            median of <span className="font-medium text-ink-700">{basis.videosSampled}</span> sampled
-            video{basis.videosSampled === 1 ? "" : "s"}
-          </span>
-          {basis.videosSampled < THIN_SAMPLE && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-risk-med-bg px-2 py-0.5 font-medium text-risk-med-fg">
-              <Info size={11} /> thin sample · indicative — a deeper run firms it up
-            </span>
+        {/* sample provenance — an honest caveat for a thin live pull, or for a value
+            derived from the creator's displayed median reach (older run, no basis shipped) */}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-500">
+          {derived ? (
+            <>
+              <span>derived from the creator's median reach</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-panel px-2 py-0.5 font-medium text-ink-600">
+                <Info size={11} /> re-run sourcing to price from the full video sample
+              </span>
+            </>
+          ) : (
+            <>
+              <span>
+                median of <span className="font-medium text-ink-700">{basis.videosSampled}</span> sampled
+                video{basis.videosSampled === 1 ? "" : "s"}
+              </span>
+              {basis.videosSampled < THIN_SAMPLE && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-risk-med-bg px-2 py-0.5 font-medium text-risk-med-fg">
+                  <Info size={11} /> thin sample · indicative — a deeper run firms it up
+                </span>
+              )}
+            </>
           )}
         </div>
       </div>
