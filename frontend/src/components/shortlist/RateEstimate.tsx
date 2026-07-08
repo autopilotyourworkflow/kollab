@@ -5,6 +5,11 @@ import { CPM_DEFAULT, computeBand, getCpm, setCpmShared, subscribeCpm } from "..
 import { compact } from "../../lib/format"
 import { cn } from "../../lib/cn"
 
+// Below this many sampled videos the reach median is thin — priced, but flagged indicative
+// (mirrors backend RATE_THIN_SAMPLE). A live search feed often surfaces only a few videos
+// per creator, so most live creators fall here on Scan/Standard.
+const THIN_SAMPLE = 5
+
 /** Economics tab — the fraud-adjusted fair-rate ESTIMATE.
  *  It is the creator's own measured organic reach × an editable CPM YOU set × authenticity.
  *  Never a market rate card: drag the CPM and the band rescales linearly. */
@@ -21,8 +26,8 @@ export function RateEstimate({ kol }: { kol: Kol }) {
           <Coins size={15} className="text-ink-400" /> Rate estimate withheld
         </div>
         <p className="text-ink-500">
-          Too few videos were sampled to price this creator's organic reach. A deeper run (more
-          videos) would surface an estimate — we withhold rather than guess.
+          No video sample was available to price this creator's organic reach. Re-run sourcing to
+          pull recent posts — we withhold rather than guess.
         </p>
       </div>
     )
@@ -71,6 +76,20 @@ export function RateEstimate({ kol }: { kol: Kol }) {
           <span className="text-ink-300">×</span>
           <span className="tnum font-semibold text-ink">{basis.authenticity}%</span>
           <span>authenticity</span>
+        </div>
+
+        {/* sample size — and an honest 'thin sample' caveat when the live pull surfaced
+            only a few of the creator's videos (common on Scan/Standard) */}
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-ink-500">
+          <span>
+            median of <span className="font-medium text-ink-700">{basis.videosSampled}</span> sampled
+            video{basis.videosSampled === 1 ? "" : "s"}
+          </span>
+          {basis.videosSampled < THIN_SAMPLE && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-risk-med-bg px-2 py-0.5 font-medium text-risk-med-fg">
+              <Info size={11} /> thin sample · indicative — a deeper run firms it up
+            </span>
+          )}
         </div>
       </div>
 

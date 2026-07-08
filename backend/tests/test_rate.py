@@ -42,6 +42,25 @@ def test_withholds_when_too_few_videos():
     assert rate_basis_for(make_kol(n_videos=RATE_MIN_VIDEOS), 80) is not None
 
 
+def test_prices_from_a_single_video_so_economics_shows_on_scan():
+    # A live search feed often surfaces just 1–4 of a creator's videos; the estimate must
+    # still compute (it's the SAME median the table shows) so Economics isn't perpetually
+    # withheld on Scan/Standard — only a truly empty video sample withholds.
+    assert rate_basis_for(make_kol(n_videos=0), 80) is None            # nothing to price
+    one = rate_basis_for(make_kol(n_videos=1, median_views=30_000), 80)
+    assert one is not None and one.videos_sampled == 1 and one.band.high > 0
+
+
+def test_thin_sample_is_flagged_indicative():
+    from app.pricing.rate import RATE_THIN_SAMPLE
+
+    thin = rate_basis_for(make_kol(n_videos=RATE_THIN_SAMPLE - 1, median_views=40_000), 80)
+    assert thin is not None and thin.videos_sampled < RATE_THIN_SAMPLE
+    assert "indicative" in thin.method.lower()  # the honest thin-sample caveat is present
+    firm = rate_basis_for(make_kol(n_videos=RATE_THIN_SAMPLE + 5), 80)
+    assert "indicative" not in firm.method.lower()  # a healthy sample carries no caveat
+
+
 def test_default_cpm_used_when_unspecified():
     basis = rate_basis_for(make_kol(n_videos=20), 100)
     assert basis.cpm_thb == DEFAULT_CPM_THB

@@ -29,7 +29,7 @@ const GUIDE: GuideSection[] = [
       "It is a decision/judgment layer, not a data source. KOL data (profiles, videos, comments) comes from a swappable adapter; Kollab's value is the vetting, matching, and ranking on top.",
       "The scraping adapter (Apify) is clearly labelled prototyping / public-data sampling only. The production target is a LICENSED feed (e.g. Tellscore, AnyMind, TikTok Creator Marketplace) behind the exact same interface — swapping it is a new adapter, not a rewrite.",
       "It flags for a human; it never auto-clears or auto-kills a creator. Every risk is routed to review with the evidence attached.",
-      "It is built as a production, SaaS-grade internal tool, not a throwaway demo — real persistence, honest error handling, health checks, and a 271-test backend suite.",
+      "It is built as a production, SaaS-grade internal tool, not a throwaway demo — real persistence, honest error handling, health checks, and a 273-test backend suite.",
     ],
   },
   {
@@ -292,7 +292,7 @@ const GUIDE: GuideSection[] = [
     id: "quality",
     title: "27. Testing & quality",
     points: [
-      "271 hermetic backend tests (pytest) on synthetic data and fake clients cover every detector in both firing and silent cases, the withhold paths, the graph's cross-run recall lift, the rate math, the overlap invariants, the ledger, the auth + workspace routes, the scheduled re-vet diff, and the outreach allowlist.",
+      "273 hermetic backend tests (pytest) on synthetic data and fake clients cover every detector in both firing and silent cases, the withhold paths, the graph's cross-run recall lift, the rate math, the overlap invariants, the ledger, the auth + workspace routes, the scheduled re-vet diff, and the outreach allowlist.",
       "Each feature was designed against its failure modes up front, then reviewed and re-tested before shipping.",
       "The frontend typechecks and builds clean; the committed pipeline payload keeps the demo, the API, and every on-screen number byte-identical by construction.",
     ],

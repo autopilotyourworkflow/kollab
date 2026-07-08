@@ -169,7 +169,7 @@ localhost.
 
 ## Testing
 
-271 tests (`backend/tests/`) on synthetic data + fake clients: run-depth plan math +
+273 tests (`backend/tests/`) on synthetic data + fake clients: run-depth plan math +
 frontend-parity enforcement, every detector (pod / burst /
 templated / thin / ER-outlier / view-to-follower / boosted / dormancy) in both firing and
 silent cases, the withhold paths (min-cohort AND min-video-sample), vetting dedup + ordering

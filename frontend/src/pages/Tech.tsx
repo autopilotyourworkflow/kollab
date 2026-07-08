@@ -145,7 +145,7 @@ const STACK: { layer: string; choice: string; why: string }[] = [
   },
   {
     layer: "Testing",
-    choice: "pytest — 271 hermetic tests",
+    choice: "pytest — 273 hermetic tests",
     why: "Synthetic data + injected fake clients. Zero network, runs in seconds, deterministic by construction.",
   },
 ]
@@ -160,7 +160,7 @@ const PRINCIPLES: { icon: typeof ShieldCheck; title: string; body: string }[] = 
   {
     icon: FlaskConical,
     title: "Deterministic in fixtures mode",
-    body: "Per-handle seeded RNG plus the dataset's own as_of date as “now” — no Date.now(), no live randomness. That's what makes the 271-test suite meaningful and the demo byte-reproducible on every run.",
+    body: "Per-handle seeded RNG plus the dataset's own as_of date as “now” — no Date.now(), no live randomness. That's what makes the 273-test suite meaningful and the demo byte-reproducible on every run.",
   },
   {
     icon: Database,
@@ -348,7 +348,7 @@ export function Tech() {
           </p>
           <div className="mt-7 flex flex-wrap gap-2">
             {[
-              "271 tests, all green",
+              "273 tests, all green",
               "FastAPI · React 19 · Neon",
               "LLM-optional by design",
               "Live in < 60s",
@@ -597,7 +597,7 @@ export function Tech() {
             <SectionHeader id="testing" title="Testing & quality" icon={FlaskConical} />
             <div className="grid gap-3 sm:grid-cols-3">
               {[
-                { v: "271", l: "hermetic backend tests" },
+                { v: "273", l: "hermetic backend tests" },
                 { v: "~9s", l: "full suite, zero network" },
                 { v: "0", l: "fabricated numbers on screen" },
               ].map((s) => (
