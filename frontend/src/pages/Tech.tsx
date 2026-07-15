@@ -170,7 +170,7 @@ const PRINCIPLES: { icon: typeof ShieldCheck; title: string; body: string }[] = 
   {
     icon: SearchCheck,
     title: "Withhold below the sample size",
-    body: "An outlier signal fires only when its peer cohort has n ≥ 15; view-to-follower withholds below 5 sampled videos. Below the gate the badge reads “insufficient baseline — signal withheld”. Absence of data is never asserted as fraud.",
+    body: "Every detector that cannot run says so, rather than reporting “clear”. An outlier signal fires only when its peer cohort has n ≥ 15; view-to-follower withholds below 5 sampled videos; the comment detectors withhold with no comment sample; the bought-audience and view-spike checks withhold when the source carries no commenter profiles or too few videos for a self-baseline — which is the common case on a live search feed, so a live Scan honestly shows several checks withheld. Absence of data is never asserted as fraud, and never as innocence: a withheld check reads “signal withheld” and names the sample it was measured against, never “checked and clear”.",
   },
   {
     icon: Scale,
