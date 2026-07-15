@@ -174,3 +174,77 @@ def test_dormancy_fires_when_stale():
 def test_dormancy_silent_when_active():
     kol = make_kol(author_id="d", newest=BASE - timedelta(days=2))
     assert cadence_dormancy(kol, now=BASE).fired is False
+
+
+# ── Absence of evidence must WITHHOLD, never report "clear" ─────────────────
+# Regression guard for the honesty rule the module states in its own constants
+# block (VTF_MIN_VIDEOS) and in vet.to_checks(): a detector that could not run
+# must say so. Reporting "No signal — checked and clear." for a sample that was
+# never judged is the exact failure this module exists to prevent. Every case
+# below returned withheld=False before the fix, and none of the 273 tests caught
+# it — the suite only ever asserted fired/not-fired, never "did the check run?".
+
+def test_commenter_reuse_withholds_when_no_comments():
+    kol = _kol_with_comments([])
+    r = commenter_reuse_across_creators(kol, build_commenter_index([kol]))
+    assert r.withheld is True and r.fired is False
+    assert r.measured_against  # must name what was (not) sampled
+
+
+def test_comment_burst_withholds_when_no_comments():
+    r = comment_burst_timing(_kol_with_comments([]))
+    assert r.withheld is True and r.fired is False
+
+
+def test_duplicate_text_withholds_when_no_comments():
+    r = duplicate_comment_text(_kol_with_comments([]))
+    assert r.withheld is True and r.fired is False
+
+
+def test_duplicate_text_withholds_when_sample_has_no_text():
+    # make_comment() always appends an index, so build blank-text comments directly.
+    blank = [RawComment(cid=f"c{i}", uid=f"u{i}", unique_id=f"@u{i}", text="   ",
+                        digg_count=0, reply_comment_total=0, create_time_iso=iso(BASE),
+                        video_web_url="https://v/1") for i in range(5)]
+    r = duplicate_comment_text(_kol_with_comments(blank))
+    assert r.withheld is True and r.fired is False
+
+
+def test_thin_commenters_withholds_when_profiles_absent():
+    """The LIVE case: the Apify comment payload carries no commenter profile fields,
+    so `sampled` is empty and the bought-audience check cannot run at all."""
+    kol = _kol_with_comments([make_comment(i, posts=None) for i in range(40)])
+    r = thin_commenter_profiles(kol)
+    assert r.withheld is True and r.fired is False
+    assert "withheld" in r.detail.lower()
+
+
+def test_boosted_post_withholds_below_self_baseline_minimum():
+    """The LIVE case: a search feed surfaces only a few videos per creator, so there
+    is no trailing baseline to compare recent reach against."""
+    r = boosted_post(make_kol(n_videos=4))
+    assert r.withheld is True and r.fired is False
+
+
+def test_boosted_post_withholds_when_no_view_baseline():
+    r = boosted_post(make_kol(n_videos=12, median_views=0))
+    assert r.withheld is True and r.fired is False
+
+
+def test_dormancy_withholds_when_no_videos():
+    kol = make_kol(n_videos=0)
+    r = cadence_dormancy(kol, BASE)
+    assert r.withheld is True and r.fired is False
+
+
+def test_sufficient_sample_still_reports_clear_not_withheld():
+    """The fix must not turn every clean result into a withhold — a check that RAN
+    and found nothing is still an honest 'clear'."""
+    kol = make_kol(n_videos=20)
+    assert boosted_post(kol).withheld is False
+    assert cadence_dormancy(kol, BASE).withheld is False
+    clean = _kol_with_comments([make_comment(i, uid=f"real{i}", posts=50, thai=True)
+                                for i in range(30)])
+    assert duplicate_comment_text(clean).withheld is False
+    assert comment_burst_timing(clean).withheld is False
+    assert thin_commenter_profiles(clean).withheld is False

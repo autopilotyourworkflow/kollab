@@ -6,4 +6,4 @@ so a reviewer never hits a rate limit. Apify / Claude / Gemini are swappable
 adapters wired behind the same interfaces, enabled only when credentials exist.
 """
 
-__version__ = "0.3.4"
+__version__ = "0.3.5"

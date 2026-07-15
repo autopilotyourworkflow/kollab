@@ -78,7 +78,18 @@ class SignalResult:
 
 
 def _clear(name: str) -> SignalResult:
+    """The detector RAN against a sufficient sample and found nothing. Only use this
+    when the check actually happened — otherwise use _withheld()."""
     return SignalResult(name=name, fired=False, level="clear", label="", detail="", measured_against="")
+
+
+def _withheld(name: str, detail: str, measured_against: str) -> SignalResult:
+    """The detector could NOT run: the sample was empty/too thin, or the upstream source
+    doesn't carry the field. Absence of evidence is not evidence of absence — reporting
+    "checked and clear" here would assert a check that never happened, which is the exact
+    failure this module exists to prevent (same rule as VTF_MIN_VIDEOS and the n>=15 gate)."""
+    return SignalResult(name=name, fired=False, level="clear", label="",
+                        detail=detail, measured_against=measured_against, withheld=True)
 
 
 # ── Cross-creator commenter reuse (LEAD structural signal) ──────────────────
@@ -99,7 +110,9 @@ def commenter_reuse_across_creators(
     creators and make up a meaningful share of THIS creator's comments."""
     comments = kol.comments
     if not comments:
-        return _clear("commenter_reuse")
+        return _withheld("commenter_reuse",
+                         "no comments sampled — pod-reuse check withheld",
+                         "0 sampled comments")
 
     pod_accounts = {
         c.uid
@@ -132,6 +145,10 @@ def commenter_reuse_across_creators(
 # ── Comment-burst timing (within-creator temporal) ──────────────────────────
 def comment_burst_timing(kol: RawKOL) -> SignalResult:
     """Bot drop: many comments inside a short window on a single video."""
+    if not kol.comments:
+        return _withheld("comment_burst",
+                         "no comments sampled — burst-timing check withheld",
+                         "0 sampled comments")
     by_video: dict[str, list[datetime]] = defaultdict(list)
     for c in kol.comments:
         by_video[c.video_web_url].append(parse_iso(c.create_time_iso))
@@ -166,10 +183,14 @@ def _norm(text: str) -> str:
 def duplicate_comment_text(kol: RawKOL) -> SignalResult:
     """Templated pod comments repeat the same normalized string many times."""
     if not kol.comments:
-        return _clear("duplicate_text")
+        return _withheld("duplicate_text",
+                         "no comments sampled — templated-text check withheld",
+                         "0 sampled comments")
     counts = Counter(_norm(c.text) for c in kol.comments if c.text.strip())
     if not counts:
-        return _clear("duplicate_text")
+        return _withheld("duplicate_text",
+                         "no comment text in the sample — templated-text check withheld",
+                         f"{len(kol.comments)} sampled comments, none with text")
     duped = sum(n for n in counts.values() if n >= DUP_MIN_REPEATS)
     share = duped / len(kol.comments)
     if share >= DUP_MIN_SHARE:
@@ -193,7 +214,12 @@ def thin_commenter_profiles(kol: RawKOL) -> SignalResult:
     """Bought audiences: sampled commenters are empty / no Thai history."""
     sampled = [c for c in kol.comments if c.commenter_post_count is not None]
     if len(sampled) < THIN_MIN_SAMPLE:
-        return _clear("thin_commenters")
+        # NB: this fires on every LIVE run today — the Apify comment payload carries no
+        # commenter profile fields, so `sampled` is empty and the check cannot run at all.
+        # It must say so rather than imply a bought-audience check passed.
+        return _withheld("thin_commenters",
+                         "commenter profile sample too thin — bought-audience check withheld",
+                         f"{len(sampled)} commenter profiles sampled (min {THIN_MIN_SAMPLE})")
     thin = [c for c in sampled if _is_thin(c)]
     share = len(thin) / len(sampled)
     if share >= THIN_MIN_SHARE:
@@ -288,11 +314,18 @@ def boosted_post(kol: RawKOL) -> SignalResult:
     (self-outliers excluded), so ad-lifted reach isn't priced as organic."""
     vids = sorted(kol.videos, key=lambda v: parse_iso(v.create_time_iso))
     if len(vids) < BOOST_RECENT_N + 3:
-        return _clear("boosted_post")
+        # A live search feed surfaces only a few of a creator's videos (see rate.py), so
+        # this is the common live case, not an edge case: without a trailing baseline there
+        # is nothing to compare recent reach against. Withhold — never imply "organic".
+        return _withheld("boosted_post",
+                         "too few videos for a self-baseline — view-spike check withheld",
+                         f"{len(vids)} sampled videos (min {BOOST_RECENT_N + 3})")
     plays = [v.play_count for v in vids]
     baseline = median_excluding_outliers(plays)
     if baseline <= 0:
-        return _clear("boosted_post")
+        return _withheld("boosted_post",
+                         "no measurable view baseline — view-spike check withheld",
+                         f"{len(vids)} sampled videos, median plays 0")
     recent_peak = max(plays[-BOOST_RECENT_N:])
     mult = recent_peak / baseline
     if mult >= BOOST_HIGH_MULT:
@@ -316,7 +349,9 @@ def boosted_post(kol: RawKOL) -> SignalResult:
 # ── Cadence / dormancy ──────────────────────────────────────────────────────
 def cadence_dormancy(kol: RawKOL, now: datetime) -> SignalResult:
     if not kol.videos:
-        return _clear("dormancy")
+        return _withheld("dormancy",
+                         "no videos sampled — cadence check withheld",
+                         "0 sampled videos")
     last = max(parse_iso(v.create_time_iso) for v in kol.videos)
     days = (now - last).days
     if days > DORMANT_DAYS:

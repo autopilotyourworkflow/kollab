@@ -10,7 +10,16 @@ an afterthought.
   interface means the Apify adapter is a **prototyping / public-data sampling** source,
   explicitly swappable for a licensed feed (Tellscore / AnyMind / TikTok Creator Marketplace)
   in production. This is stated in the README and enforced in code: the Apify network path is
-  guarded and disabled by default; the deployed demo runs on curated fixtures.
+  guarded and off by default (`KOLLAB_SOURCE=seed`), and local/test runs use curated fixtures.
+- **The deployed demo does scrape.** `render.yaml` sets `KOLLAB_SOURCE=apify`, so
+  kollab-api.onrender.com performs live public-data sampling via the Apify actor
+  (`clockworks/tiktok-scraper`) and `/health` reports `"source":"apify"`. An earlier version of
+  this document said the deployed demo ran on fixtures; that was true when written and went
+  stale when the deployment was switched to live sourcing. It is corrected here rather than
+  left standing, because a document that claims honesty is a design constraint is the last
+  place a stale claim belongs. **The ToS exposure of that live path is real and sits with
+  whoever operates it** — which is exactly why the licensed-feed adapter, not the scraper, is
+  the production answer.
 - Everything is cited where a claim rests on an external fact — the Apify actor payloads, the
   fraud methodology, and (in production) any Thai brand-safety or rate/benchmark source.
 
