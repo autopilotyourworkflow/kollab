@@ -259,8 +259,55 @@ const ROADMAP = [
   "Embeddings / pgvector retrieval for recall at licensed-feed scale",
   "A native deal-pipeline board (outreach → booked → delivered)",
   "Surfacing the computed-confidence functions in the API contract and UI",
+  "Scaling authenticity confidence by how many checks actually ran, not only comment sample size",
   "A learned rate/outcome model from accumulated agency deal history",
   "Thai-native validation of the taboo and pod lexicons",
+]
+
+/* The next scope, named but deliberately NOT built. Kollab today answers one question
+ * well — is this creator real, and do they fit the brand. Everything below is the
+ * campaign layer that sits around that answer: what an agency needs to actually LAUNCH.
+ * It is listed here rather than half-shipped because a stub of each would demo nicely
+ * and tell a reviewer nothing true. Same rule as the withhold gate, applied to scope. */
+interface PlannedTrack {
+  title: string
+  tag: string
+  intent: string
+  items: string[]
+  honesty: string
+}
+
+const PLANNED: PlannedTrack[] = [
+  {
+    title: "KOL management — the campaign brief",
+    tag: "Bigger than Macro · เน้น commercial",
+    intent:
+      "Extending past vetting a creator into running a commercial campaign around them, with a bias to the larger-than-macro tiers where the money and the downside both concentrate.",
+    items: [
+      "Campaign name · objective",
+      "Business description · product / service",
+      "Product value · unique selling point",
+      "Social media URLs (today the brief ingests the website only)",
+      "Persona (today approximated by the brief's audience field)",
+      "Budget · channel / format",
+      "KOL tier price range",
+      "Script / storyboard generator",
+    ],
+    honesty:
+      "The brief today carries brand, category, audience, region, website, tone and search terms — enough to source and vet, not enough to launch. KOL tier price range is the pointed one: it is absent by choice, not by oversight. Publishing Thai tier bands I cannot source would be a fabricated number an account manager spots on sight, and one fake number discredits every real one on the page. It arrives when the delivery ledger has real bookings behind it, or with a licensed rate feed.",
+  },
+  {
+    title: "UGC — TikTok, from real product experience",
+    tag: "ประสบการณ์จริง",
+    intent:
+      "Creator-led UGC where the post is grounded in genuine use of the product, rather than a read-out of brand copy — the format that actually converts on Thai TikTok.",
+    items: [
+      "Scripts written for the KOL's own social media and their follower base",
+      "Grounded in the creator's real experience of the product, not brand boilerplate",
+    ],
+    honesty:
+      "Generation is the easy half and it is not the hard problem. The constraint is the same one the outreach draft already runs into: a script that invents a product claim is worse than no script. This ships behind the existing citation validator, and it wants Thai-native review before it goes near a client.",
+  },
 ]
 
 /* ── Section scaffold ───────────────────────────────────────────────────────── */
@@ -687,6 +734,47 @@ export function Tech() {
                 </ul>
               </Card>
             </div>
+
+            {/* Next scope — named, deliberately not built. */}
+            <Card className="!p-5">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
+                <span className="text-[13px] font-semibold text-ink-700">Next scope — the campaign layer</span>
+                <span className="rounded-full bg-panel px-2 py-px text-[10px] font-medium uppercase tracking-wide text-ink-500">
+                  Planned · not built
+                </span>
+              </div>
+              <p className="mb-4 max-w-[78ch] text-[13px] leading-relaxed text-ink-600">
+                Kollab answers one question well today: is this creator real, and do they fit the brand. The two
+                tracks below are what an agency needs around that answer to actually launch. They are written down
+                rather than stubbed, because a placeholder for each would demo well and tell you nothing true.
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">
+                {PLANNED.map((t) => (
+                  <div key={t.title} className="rounded-xl border border-border bg-surface/60 p-4">
+                    <div className="text-[13px] font-semibold text-ink">{t.title}</div>
+                    {/* Not uppercase/tracked: the tag carries Thai, which neither
+                        upper-cases nor letter-spaces well. */}
+                    <div className="mt-0.5 text-[11.5px] font-medium text-ink-500">{t.tag}</div>
+                    <p className="mt-2 text-[12.5px] leading-relaxed text-ink-600">{t.intent}</p>
+                    <ul className="mt-3 space-y-1.5">
+                      {t.items.map((i) => (
+                        <li key={i} className="flex gap-2 text-[12.5px] leading-relaxed text-ink-600">
+                          <span
+                            className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-border-strong"
+                            aria-hidden
+                          />
+                          <span>{i}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-3 border-t border-border pt-3 text-[12px] leading-relaxed text-ink-500">
+                      <span className="font-semibold text-ink-600">Why it isn&rsquo;t shipped: </span>
+                      {t.honesty}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </Card>
           </section>
         </div>
 
